@@ -83,31 +83,85 @@ platform**, and the connection panel lets you pick which:
 ### Linux — the `socketcan` backend
 
 The `peak_usb` kernel module (in mainline Linux) presents the adapter as
-ordinary SocketCAN interfaces, so `PCANBasic` is not involved at all.
+ordinary SocketCAN interfaces, so `PCANBasic` is not involved at all. No PEAK
+driver download is needed.
+
+Work through these in order. Each step is checkable, so a failure tells you
+where the problem is instead of leaving you guessing at the GUI.
+
+**1. Get the binary**
+
+```bash
+# from the Releases page, or:
+gh release download v1.0.1 --pattern openarmx-robstride
+chmod +x openarmx-robstride
+```
+
+**2. Confirm the kernel sees the adapter**
+
+```bash
+lsusb | grep -i peak                  # expect 0c72:0012
+dmesg | grep -i peak_usb              # expect the driver binding, 2 channels
+```
+
+If `lsusb` shows nothing, it is a cable or power problem, not software.
+
+**3. Bring the interfaces up**
 
 ```bash
 sudo modprobe peak_usb
 sudo ip link set can0 up type can bitrate 1000000
 sudo ip link set can1 up type can bitrate 1000000
-ip -details link show can0            # confirm it is up
+ip -details link show can0            # expect "state UP" and bitrate 1000000
 ```
 
 The bitrate comes from `ip link`, not from the app — the selector greys out
 when SocketCAN is chosen. `Detect adapters` also lists interfaces that exist
 but are still down, since those are the ones you need to bring up.
 
-To use CAN without running as root:
+**4. Sanity-check the bus before involving this tool**
+
+Worth doing once. It separates "the bus is wrong" from "the app is wrong".
 
 ```bash
-sudo setcap cap_net_raw+ep ./openarmx-robstride
+sudo apt install can-utils
+candump can0                          # in one terminal
+cansend can0 '00000000#'              # in another - candump should show it
 ```
 
-PySide6 also needs system Qt libraries:
+With motors powered and the bus terminated, `candump can0` stays quiet until
+something is asked to talk — the motors do not chatter unprompted unless
+active reporting was enabled. If you see errors scrolling, suspect
+termination or bitrate before anything else.
+
+**5. Install the Qt runtime libraries**
 
 ```bash
 sudo apt install libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
                  libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
 ```
+
+**6. Verify the build itself**
+
+```bash
+./openarmx-robstride --selftest       # expect 9/9
+```
+
+**7. Run it without root**
+
+```bash
+sudo setcap cap_net_raw+ep ./openarmx-robstride
+./openarmx-robstride
+```
+
+In the app: set the backend to `socketcan`, channel `can0` / `can1`, open, then
+**Scan bus**. Set each motor's model before touching anything — see the model
+warnings above; on this rig that means RS00, RS03 and RS04.
+
+**First contact with a motor, in order:** scan → select → set the model →
+`Read all` in the Parameters tab → watch the CAN trace to confirm frames look
+sane. Only then go near the Control tab, and expect the joint to move the
+moment you enable.
 
 ### Both platforms
 
