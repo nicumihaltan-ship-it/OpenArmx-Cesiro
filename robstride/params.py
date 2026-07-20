@@ -291,7 +291,7 @@ _RS04_SPECIFIC: list[Param] = [
 
 ]
 
-# Extracted from RS00User Manual260713.pdf and RS03User Manual260713.pdf, each
+# Extracted from the official RS00 and RS03 user manuals (260713), each
 # read twice - once from flattened text, once from cell-aligned table
 # extraction - with both passes required to agree. Rows whose secondary fields
 # (min/max or remark) printed inconsistently are marked UNVERIFIED in their

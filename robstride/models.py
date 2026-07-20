@@ -6,8 +6,8 @@ torque all decode to plausible-looking but incorrect numbers - so each entry
 carries a ``verified`` flag saying whether a primary source backs it.
 
 All five models below are confirmed against the official RobStride user
-manuals (RS04 from the copy in this folder, RS00-RS03 from the manuals
-mirrored at files.seeedstudio.com/products/RobStride/), and independently
+manuals, published by the vendor at
+https://github.com/RobStride/Product_Information, and independently
 cross-checked against the ``kscalelabs/actuator`` Rust driver, which agrees on
 every constant.
 
@@ -39,7 +39,7 @@ _CONFIG = Path(__file__).with_name("models.json")
 P_LIMIT = 12.57
 
 _BUILTIN: dict[str, MotorLimits] = {
-    # In use on the OpenArmX arms, verified against the manual in this repo.
+    # In use on the OpenArmX arms, verified against the RS00 manual.
     "RS00": MotorLimits("RS00", p_max=P_LIMIT, v_max=33.0, t_max=14.0,
                         kp_max=500.0, kd_max=5.0,
                         i_max=16.0, gear_ratio=10.0, verified=True),
@@ -56,7 +56,7 @@ _BUILTIN: dict[str, MotorLimits] = {
     "RS02": MotorLimits("RS02", p_max=P_LIMIT, v_max=44.0, t_max=17.0,
                         kp_max=500.0, kd_max=5.0,
                         i_max=23.0, gear_ratio=7.75, verified=True),
-    # In use on the OpenArmX arms, verified against the manual in this repo.
+    # In use on the OpenArmX arms, verified against the RS03 manual.
     "RS03": MotorLimits("RS03", p_max=P_LIMIT, v_max=20.0, t_max=60.0,
                         kp_max=5000.0, kd_max=100.0,
                         i_max=43.0, gear_ratio=9.0, verified=True),

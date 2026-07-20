@@ -19,6 +19,11 @@ __pycache__/
 # Local machine-specific model overrides
 robstride/models.json
 
+# Vendor documentation. RobStride's manuals are their copyrighted material and
+# this repo is public, so they are kept locally but not redistributed here.
+# Official copies: https://github.com/RobStride/Product_Information
+*.pdf
+
 # Captured data and parameter dumps from live sessions
 robstride_scope*.csv
 robstride_trace*.csv

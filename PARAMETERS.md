@@ -6,8 +6,9 @@ repeated descriptions. Everything here is marked as either **confirmed**
 the manual's own sample values), or **inferred** (reasoning from naming and
 hardware, not confirmed).
 
-> **Read the Chinese manuals.** RobStride publish current manuals for every
-> model at
+> **You will need the manuals.** They are not included in this repository —
+> they are RobStride's copyrighted material and this repo is public. Get them
+> from the vendor, and prefer the **Chinese** editions:
 > [github.com/RobStride/Product_Information](https://github.com/RobStride/Product_Information)
 > (`产品资料/RS0N/`). They are consistently more precise than the English
 > translations, which contain outright errors — `0x3007` is labelled "Bus
