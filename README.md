@@ -46,8 +46,23 @@ newer (Ubuntu 22.04+, Debian 12+).
 ## Running from source
 
 ```
-run.bat                                  # Windows
+git clone https://github.com/nicumihaltan-ship-it/OpenArmx-Cesiro.git
+cd OpenArmx-Cesiro
+py -3.11 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe app.py          # add --debug for verbose logging
+```
+
+On Windows, **clone into a short path** such as `C:\OpenArmx`. PySide6 has
+deeply nested internal files, and installing it under an already-deep directory
+fails with `WinError 206: The filename or extension is too long` — the classic
+260-character `MAX_PATH` limit. Enabling long paths
+(`LongPathsEnabled` in the registry) also works.
+
+Afterwards:
+
+```
+run.bat                                  # Windows
 ./.venv/bin/python app.py                # Linux
 ```
 
