@@ -1,0 +1,26 @@
+# Build output - binaries are produced by CI or build_linux.sh, not committed.
+dist/
+build/
+*.spec.bak
+selftest-report.txt
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local machine-specific model overrides
+robstride/models.json
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

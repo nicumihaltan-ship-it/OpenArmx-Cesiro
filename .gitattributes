@@ -1,0 +1,14 @@
+# Normalise text files to LF in the repository.
+* text=auto
+
+# Shell scripts must be LF even when checked out on Windows: a CRLF script
+# fails on Linux with "bad interpreter: /usr/bin/env bash^M".
+*.sh text eol=lf
+
+# Batch files are the mirror case - they need CRLF to be reliable.
+*.bat text eol=crlf
+
+# Binary assets: never touch line endings.
+*.pdf binary
+*.png binary
+*.ico binary
