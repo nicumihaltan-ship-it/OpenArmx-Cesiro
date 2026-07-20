@@ -8,6 +8,7 @@ stays reachable at all times.
 from __future__ import annotations
 
 import logging
+import time
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
@@ -45,6 +46,7 @@ class ControlView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.motor: Motor | None = None
+        self._last_mode: RunMode | None = None
         self._build_ui()
 
         self._timer = QTimer(self)
@@ -92,13 +94,25 @@ class ControlView(QWidget):
             self.mode_box.addItem(label, mode)
         self.apply_mode_button = QPushButton("Apply mode")
         self.apply_mode_button.setToolTip(
-            "Writes 0x7005. Do this while the motor is stopped.")
+            "Writes 0x7005. Not required before the Apply buttons below - "
+            "each of those sets the mode it needs on its own.")
         self.apply_mode_button.clicked.connect(self._apply_mode)
+
+        # The dropdown is only a request; this shows what the motor is really
+        # in, read back from 0x7005. They drift apart easily - jogging, for
+        # instance, forces velocity mode.
+        self.actual_mode = QLabel("motor mode: unknown")
+        self.actual_mode.setStyleSheet("color: gray;")
+        self.refresh_mode_button = QPushButton("Read")
+        self.refresh_mode_button.setToolTip("Re-read run_mode (0x7005)")
+        self.refresh_mode_button.clicked.connect(self._read_mode)
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Control mode"))
         mode_row.addWidget(self.mode_box, 1)
         mode_row.addWidget(self.apply_mode_button)
+        mode_row.addWidget(self.actual_mode)
+        mode_row.addWidget(self.refresh_mode_button)
 
         # -- per-mode setpoints
         self.op_torque = _spin(-120, 120, 0.0, 0.5, "Nm")
@@ -106,6 +120,11 @@ class ControlView(QWidget):
         self.op_velocity = _spin(-15, 15, 0.0, 0.1, "rad/s")
         self.op_kp = _spin(0, 500, 0.0, 1.0)
         self.op_kd = _spin(0, 100, 1.0, 0.1)
+        self.op_start = QPushButton("Enter mode")
+        self.op_start.setToolTip(
+            "Switch to operation control and enable, before streaming type-1 "
+            "commands with Send.")
+        self.op_start.clicked.connect(self._start_motion_mode)
         self.op_send = QPushButton("Send")
         self.op_send.clicked.connect(self._send_motion)
         self.op_stream = QCheckBox("Stream at 100 Hz")
@@ -119,14 +138,14 @@ class ControlView(QWidget):
         op_form.addRow("Kp", self.op_kp)
         op_form.addRow("Kd", self.op_kd)
         op_row = QHBoxLayout()
+        op_row.addWidget(self.op_start)
         op_row.addWidget(self.op_send)
         op_row.addWidget(self.op_stream)
         op_form.addRow(op_row)
 
         self.current_ref = _spin(-90, 90, 0.0, 0.1, "A")
         self.current_send = QPushButton("Apply Iq")
-        self.current_send.clicked.connect(
-            lambda: self._write(0x7006, self.current_ref.value(), "Iq"))
+        self.current_send.clicked.connect(self._apply_current)
 
         current_box = QGroupBox("Current mode")
         current_form = QFormLayout(current_box)
@@ -149,7 +168,10 @@ class ControlView(QWidget):
         self.pos_ref = _spin(-12.57, 12.57, 0.0, 0.05, "rad")
         self.pos_speed = _spin(0, 20, 2.0, 0.1, "rad/s")
         self.pos_accel = _spin(0, 200, 10.0, 1.0, "rad/s^2")
-        self.pos_send = QPushButton("Apply position")
+        self.pos_send = QPushButton("Go to position")
+        self.pos_send.setToolTip(
+            "Sets the position mode selected above, enables the motor, then "
+            "sends the target. No need to press Enable or Apply mode first.")
         self.pos_send.clicked.connect(self._apply_position)
 
         pos_box = QGroupBox("Position mode (PP / CSP)")
@@ -202,8 +224,11 @@ class ControlView(QWidget):
     def set_motor(self, motor: Motor | None) -> None:
         self.op_stream.setChecked(False)
         self.motor = motor
+        self._last_mode = None
         if motor is None:
             self.info.setText("No motor selected")
+            self.actual_mode.setText("motor mode: unknown")
+            self.actual_mode.setStyleSheet("color: gray;")
             return
         limits = motor.limits
         self.info.setText(
@@ -221,6 +246,7 @@ class ControlView(QWidget):
         self.pos_ref.setRange(limits.p_min, limits.p_max)
         self.current_ref.setRange(-limits.i_max, limits.i_max)
         self.speed_limit_cur.setRange(0, limits.i_max)
+        self._read_mode()
 
     def _require(self) -> Motor | None:
         if self.motor is None:
@@ -278,8 +304,15 @@ class ControlView(QWidget):
             return
         mode = self.mode_box.currentData()
         try:
+            # Stop first: the manual is explicit that a mode change while
+            # running is undefined behaviour.
+            motor.stop()
+            time.sleep(0.01)
             motor.set_run_mode(mode)
-            self.status.emit(f"run_mode = {mode.name} on motor {motor.motor_id}")
+            self._refresh_mode_label(mode)
+            self.status.emit(
+                f"run_mode = {mode.name} on motor {motor.motor_id} "
+                f"(motor is stopped - press Enable, or just use an Apply button)")
         except Exception as exc:
             QMessageBox.critical(self, "Mode change failed", str(exc))
 
@@ -292,6 +325,38 @@ class ControlView(QWidget):
             self.status.emit(f"{label} = {value:g} on motor {motor.motor_id}")
         except Exception as exc:
             QMessageBox.critical(self, "Write failed", str(exc))
+
+    def _read_mode(self) -> None:
+        motor = self.motor
+        if motor is None:
+            return
+        raw = motor.read(0x7005, timeout=0.3)
+        if raw is None:
+            self.actual_mode.setText("motor mode: no reply")
+            self.actual_mode.setStyleSheet("color: #c0392b;")
+            return
+        try:
+            self._refresh_mode_label(RunMode(int(raw)))
+        except ValueError:
+            self.actual_mode.setText(f"motor mode: unknown ({int(raw)})")
+            self.actual_mode.setStyleSheet("color: #c0392b;")
+
+    def _refresh_mode_label(self, mode: RunMode) -> None:
+        self.actual_mode.setText(f"motor mode: {mode.name}")
+        matches = mode is self.mode_box.currentData()
+        self.actual_mode.setStyleSheet(
+            "color: #27ae60;" if matches else "color: #e67e22;")
+
+    def _start_motion_mode(self) -> None:
+        """Enter operation-control mode, ready for type-1 commands."""
+        motor = self._require()
+        if motor is None:
+            return
+        try:
+            self._ensure_mode(motor, RunMode.OPERATION)
+            self.status.emit("Operation control mode ready")
+        except Exception as exc:
+            QMessageBox.critical(self, "Mode change failed", str(exc))
 
     def _send_motion(self) -> None:
         motor = self.motor
@@ -315,11 +380,36 @@ class ControlView(QWidget):
         else:
             self._stream_timer.stop()
 
+    def _ensure_mode(self, motor: Motor, mode: RunMode) -> None:
+        """Put the motor into ``mode`` and enable it, ready for a setpoint.
+
+        Writing a setpoint that belongs to a different mode is silently
+        ignored by the firmware - a loc_ref written while in velocity mode
+        does nothing and reports no error. So every "apply" path has to
+        guarantee the mode itself rather than assume the user sequenced the
+        buttons correctly.
+
+        The manual requires the motor be stopped before a mode change, so
+        switching goes stop -> write run_mode -> enable. When the motor is
+        already in the right mode that dance is skipped, since a needless
+        disable/enable makes the joint drop and re-grab its load.
+        """
+        current = motor.read(0x7005, timeout=0.2)
+        if current is None or int(current) != int(mode):
+            motor.stop()
+            time.sleep(0.01)
+            motor.write(0x7005, int(mode))
+            time.sleep(0.01)
+        motor.enable()
+        self._last_mode = mode
+        self._refresh_mode_label(mode)
+
     def _apply_speed(self) -> None:
         motor = self._require()
         if motor is None:
             return
         try:
+            self._ensure_mode(motor, RunMode.VELOCITY)
             motor.write(0x7018, self.speed_limit_cur.value())
             motor.write(0x7022, self.speed_accel.value())
             motor.write(0x700A, self.speed_ref.value())
@@ -327,19 +417,36 @@ class ControlView(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Write failed", str(exc))
 
+    def _apply_current(self) -> None:
+        motor = self._require()
+        if motor is None:
+            return
+        try:
+            self._ensure_mode(motor, RunMode.CURRENT)
+            motor.write(0x7006, self.current_ref.value())
+            self.status.emit(f"Iq {self.current_ref.value():g} A applied")
+        except Exception as exc:
+            QMessageBox.critical(self, "Write failed", str(exc))
+
     def _apply_position(self) -> None:
         motor = self._require()
         if motor is None:
             return
+        # PP and CSP are different firmware modes with different speed-limit
+        # registers, so honour whichever the dropdown selects.
         mode = self.mode_box.currentData()
+        if mode not in (RunMode.POSITION_PP, RunMode.POSITION_CSP):
+            mode = RunMode.POSITION_CSP
         try:
+            self._ensure_mode(motor, mode)
             if mode is RunMode.POSITION_PP:
                 motor.write(0x7024, self.pos_speed.value())
                 motor.write(0x7025, self.pos_accel.value())
             else:
                 motor.write(0x7017, self.pos_speed.value())
             motor.write(0x7016, self.pos_ref.value())
-            self.status.emit(f"Position {self.pos_ref.value():g} rad applied")
+            self.status.emit(
+                f"Moving to {self.pos_ref.value():g} rad in {mode.name}")
         except Exception as exc:
             QMessageBox.critical(self, "Write failed", str(exc))
 
@@ -349,8 +456,7 @@ class ControlView(QWidget):
             return
         speed = self.jog_speed.value() * direction
         try:
-            motor.write(0x7005, int(RunMode.VELOCITY))
-            motor.enable()
+            self._ensure_mode(motor, RunMode.VELOCITY)
             motor.write(0x700A, speed)
             self.status.emit(f"Jog at {speed:g} rad/s" if direction
                              else "Jog stopped")

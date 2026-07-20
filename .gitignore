@@ -19,6 +19,13 @@ __pycache__/
 # Local machine-specific model overrides
 robstride/models.json
 
+# Captured data and parameter dumps from live sessions
+robstride_scope*.csv
+robstride_trace*.csv
+robstride_params*.json
+robstride_params*.csv
+.~lock.*#
+
 # Editors / OS
 .vscode/
 .idea/
