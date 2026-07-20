@@ -29,12 +29,19 @@ platform:
 ./build_linux.sh
 ```
 
-**No Linux machine?** Push the repo to GitHub and run the
-`Build executables` workflow (`.github/workflows/build.yml`) from the Actions
-tab. It builds both binaries and attaches them to the run; pushing a `v*` tag
-also creates a release. The Linux job builds on Ubuntu 22.04 deliberately —
-glibc is not backward-compatible, so a binary built on a newer release will
-refuse to start on an older one.
+**No Linux machine?** Run the `Build executables` workflow
+(`.github/workflows/build.yml`) from the Actions tab:
+
+```
+gh workflow run "Build executables" --ref main
+gh run download <run-id> --dir ci-artifacts
+```
+
+It builds both binaries and attaches them to the run; pushing a `v*` tag also
+creates a release. The Linux job builds on Ubuntu 22.04 deliberately — glibc is
+not backward-compatible, so a binary built on a newer release will refuse to
+start on an older one. Building there means the binary runs on glibc 2.35 and
+newer (Ubuntu 22.04+, Debian 12+).
 
 ## Running from source
 
@@ -201,20 +208,21 @@ scaling constant. Run them with:
 .venv\Scripts\python.exe -m pytest tests -q
 ```
 
-The Windows executable additionally passes all nine `--selftest` checks as a
-frozen build, which is what catches PyInstaller's usual failure mode (backends
-that resolve from source but not once packaged).
+Both executables additionally pass all nine `--selftest` checks as frozen
+builds, verified in CI — that is what catches PyInstaller's usual failure mode
+(backends that resolve from source but not once packaged). The Linux binary is
+built and checked on Ubuntu 22.04 / glibc 2.35.
 
 **Not verified: anything involving real hardware.** No PCAN driver or adapter
-was present on this machine, so the transport layer, bus scanning, live
-polling and all motor commands have never been exercised against an actual
-motor. Bring up one motor on the bench, watch the CAN trace tab to confirm
-frames look right, and only then connect a full arm.
+was present on the machine this was written on, so the transport layer, bus
+scanning, live polling and all motor commands have never been exercised
+against an actual motor. In particular the SocketCAN path — the one the Linux
+build depends on — has never seen a real adapter. Bring up one motor on the
+bench, watch the CAN trace tab to confirm frames look right, and only then
+connect a full arm.
 
-**Not verified: the Linux build.** It could not be produced here — no Linux
-machine, no WSL, no Docker. `build_linux.sh` and the CI workflow are written
-but have never been run. The SocketCAN backend selection is likewise untested
-against a real adapter.
+**Not verified: `build_linux.sh`.** CI builds Linux with the same spec file, so
+the packaging is proven, but that script itself has never been run.
 
 One other gap: the manual documents `0x7005`–`0x702E` for RS04, and the same
 table is *very likely* identical on the other models — but that table is a

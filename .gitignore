@@ -1,6 +1,7 @@
 # Build output - binaries are produced by CI or build_linux.sh, not committed.
 dist/
 build/
+ci-artifacts/
 *.spec.bak
 selftest-report.txt
 
