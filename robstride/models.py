@@ -39,9 +39,14 @@ _CONFIG = Path(__file__).with_name("models.json")
 P_LIMIT = 12.57
 
 _BUILTIN: dict[str, MotorLimits] = {
+    # In use on the OpenArmX arms, verified against the manual in this repo.
     "RS00": MotorLimits("RS00", p_max=P_LIMIT, v_max=33.0, t_max=14.0,
                         kp_max=500.0, kd_max=5.0,
                         i_max=16.0, gear_ratio=10.0, verified=True),
+    # Not fitted to the OpenArmX arms; kept for completeness. Note these have
+    # no confirmed 0x20xx/0x30xx parameter table in params.py, so the tool
+    # blocks config writes for them until someone extracts their manuals.
+    #
     # RS01 and RS02 genuinely share protocol constants despite differing
     # physically (315 vs 410 rpm no-load). RS01's protocol V_MAX of 44 rad/s
     # over-provisions its real capability - do not "fix" it down to 33.
@@ -51,6 +56,7 @@ _BUILTIN: dict[str, MotorLimits] = {
     "RS02": MotorLimits("RS02", p_max=P_LIMIT, v_max=44.0, t_max=17.0,
                         kp_max=500.0, kd_max=5.0,
                         i_max=23.0, gear_ratio=7.75, verified=True),
+    # In use on the OpenArmX arms, verified against the manual in this repo.
     "RS03": MotorLimits("RS03", p_max=P_LIMIT, v_max=20.0, t_max=60.0,
                         kp_max=5000.0, kd_max=100.0,
                         i_max=43.0, gear_ratio=9.0, verified=True),

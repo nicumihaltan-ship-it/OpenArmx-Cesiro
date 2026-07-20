@@ -176,6 +176,13 @@ knowing:
 - **Firmware older than 0.0.2.6 used P_MAX 12.5, not 12.57.** Check
   `AppCodeVersion` (`0x1003`) on old units.
 
+**The parameter tables differ per model too**, which is more dangerous than
+the scaling constants. `CAN_ID` is at `0x200A` on RS00 but `0x2009` on
+RS03/RS04 — and on RS00, `0x2009` is the baud rate. The tool keys its tables
+by model and refuses `0x20xx`/`0x30xx` writes for any model whose table is
+unconfirmed. Confirmed tables: **RS00, RS03, RS04**. Only the `0x7005`–`0x702E`
+runtime range is identical across models. See [PARAMETERS.md](PARAMETERS.md).
+
 Set each motor's model in the connection panel's `Model` column. To override
 any constant, drop a `robstride/models.json`:
 

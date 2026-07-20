@@ -118,18 +118,36 @@ class Motor:
 
     # -- parameters -------------------------------------------------------
 
+    def param(self, index: int):
+        """This motor's definition for a parameter index, model-aware."""
+        return P.get(index, self.model)
+
     def read(self, index: int, timeout: float = 0.25):
         """Read one parameter, returning its engineering value (or ``None``)."""
         reply = self.link.read_param_raw(self.motor_id, index, timeout)
         if reply is None or not reply.ok:
             return None
-        param = P.get(index)
+        param = self.param(index)
         return param.decode(reply.raw) if param else reply.raw
 
     def write(self, index: int, value) -> None:
-        param = P.get(index)
+        """Write one parameter.
+
+        Refuses model-specific indices when this motor's model has no
+        confirmed table. The 0x20xx/0x30xx layouts differ between models, so
+        writing by an assumed table can hit an entirely different register -
+        on RS00 the CAN id is at 0x200A while 0x2009 is motor_baud, and
+        confusing the two takes the motor off the bus.
+        """
+        if P.is_model_specific(index) and not P.has_table(self.model):
+            raise PermissionError(
+                f"No confirmed parameter table for {self.model}, so writing "
+                f"0x{index:04X} is unsafe - the 0x20xx/0x30xx layout differs "
+                f"between models. Runtime control (0x70xx) is unaffected.")
+        param = self.param(index)
         if param is None:
-            raise KeyError(f"Unknown parameter index 0x{index:04X}")
+            raise KeyError(
+                f"0x{index:04X} is not in the {self.model} parameter table")
         if not param.writable:
             raise PermissionError(f"{param.name} (0x{index:04X}) is read-only")
         self.link.send(

@@ -19,22 +19,79 @@ hardware, not confirmed).
 
 ## How the address space is organised
 
-| Range | Contents | Storage | Access |
-|---|---|---|---|
-| `0x0000`–`0x0001` | Name, barcode | flash | R/W |
-| `0x1000`–`0x1007` | Bootloader and firmware version strings | flash | R |
-| `0x2000`–`0x2029` | Configuration and calibration | flash — needs a **type-22 save** | R/W |
-| `0x3000`–`0x3048` | Live observation values | volatile | **R only** |
-| `0x7005`–`0x702E` | Runtime control | volatile (some mirrored to `0x20xx`) | R/W |
+| Range | Contents | Storage | Access | Same on every model? |
+|---|---|---|---|---|
+| `0x0000`–`0x0001` | Name, barcode | flash | R/W | yes |
+| `0x1000`–`0x1007` | Bootloader and firmware version strings | flash | R | yes |
+| `0x2000`–`0x20xx` | Configuration and calibration | flash — needs a **type-22 save** | R/W | **NO** |
+| `0x3000`–`0x30xx` | Live observation values | volatile | **R only** | **NO** |
+| `0x7005`–`0x702E` | Runtime control | volatile (some mirrored to `0x20xx`) | R/W | **yes** |
 
-Two practical consequences:
+Three practical consequences:
 
 - Writing a `0x20xx` parameter changes behaviour immediately but is **lost on
   power-off** unless you follow it with a type-22 save.
 - Several names appear twice, once in `0x20xx` and once in `0x70xx`
   (`limit_spd`, `limit_cur`, `cur_kp`, `zero_sta`, `damper`, `add_offset`).
   The `0x70xx` copy is the live one the control loop reads; the `0x20xx` copy
-  is what gets restored at boot.
+  is what gets restored at boot. **Prefer the `0x70xx` handle** — it is
+  model-independent, so using it sidesteps the hazard below entirely.
+- The `0x20xx` and `0x30xx` layouts **differ per model**. Read on.
+
+## The register layout is model-specific — and this one bites
+
+This is the single most dangerous thing about the parameter interface, and no
+manual states it, because each manual only describes its own model.
+
+Comparing the RS00, RS03 and RS04 manuals directly: RS00 and RS03 disagree on
+**21 of 40** config indices and **33** observation indices. The identity
+registers are among them:
+
+| Parameter | RS00 | RS03 | RS04 |
+|---|---|---|---|
+| `CAN_ID` | **`0x200A`** | `0x2009` | `0x2009` |
+| `CAN_MASTER` | `0x200B` | `0x200A` | `0x200A` |
+| baud rate | **`0x2009`** (`motor_baud`) | `0x2022` | `0x2024` |
+| `CAN_TIMEOUT` | `0x200C` | `0x200B` | `0x200B` |
+| `protocol_1` | `0x2022` | `0x2025` | `0x2027` |
+| `zero_sta` | `0x2021` | `0x2023` | `0x2025` |
+| `damper` | `0x2023` | `0x2026` | `0x2028` |
+| `MechOffset` | `0x2005` | `0x2005` | `0x2005` |
+
+Note the first two rows together. On an RS03 or RS04, `0x2009` is the CAN id.
+On an **RS00 it is the baud rate.** Change a motor's CAN id using the wrong
+model's table and you will instead set its bitrate — the motor drops off the
+bus at the next power cycle and will not answer a scan until you find it again
+at whatever rate you accidentally selected.
+
+Because of this, the tool keys its parameter tables by model
+(`robstride/params.py`), never shares them, and **refuses to write** any
+`0x20xx`/`0x30xx` index for a model whose table has not been confirmed. Set
+each motor's model in the connection panel before touching anything in those
+ranges.
+
+By contrast the `0x7005`–`0x702E` runtime range is **verified identical**
+across RS00, RS03 and RS04 — all 29 entries agree on index, name, type and
+permission. Only the documented value *ranges* differ, tracking each motor's
+rating (`iq_ref` ±16 A on RS00 versus ±43 A on RS03), plus one default
+(`loc_kp` 40 versus 60). So motion-control code is portable between models;
+configuration code is not.
+
+### Provenance
+
+The RS00 and RS03 tables here were extracted from their own manuals twice —
+once from flattened text, once from cell-aligned table extraction — with both
+passes required to agree. Eleven rows where the secondary fields (min/max or
+remark) printed inconsistently are marked `[UNVERIFIED]` in the tool's note
+column and carry no range. The names and indices on those rows are still
+trustworthy; only the ranges and remarks are doubtful.
+
+One known defect worth naming: in the RS03 manual, the remark column across
+`0x2009`–`0x200C` is shifted one row against the names, so `CAN_ID` carries a
+remark reading "Motor index" and `CAN_TIMEOUT` prints as `uint8` even though
+§3.3.6 says 20000 = 1 s, which cannot fit in a byte. The *names* were
+cross-checked and are correct; treat that block's types and ranges with
+suspicion and read back before relying on them.
 
 ## What you actually use for control
 

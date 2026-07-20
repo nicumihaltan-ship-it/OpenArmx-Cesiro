@@ -75,9 +75,11 @@ class ParamsView(QWidget):
         self._reader: ReadAllWorker | None = None
         self._rows: dict[int, int] = {}      # param index -> table row
         self._suppress_edit = False
+        self._params: list[P.Param] = []
+        self._model = P.FALLBACK_MODEL
 
         self._build_ui()
-        self._populate()
+        self._populate(self._model)
 
     # -- construction -----------------------------------------------------
 
@@ -156,10 +158,19 @@ class ParamsView(QWidget):
         layout.addWidget(self.info)
         layout.addWidget(self.table, 1)
 
-    def _populate(self) -> None:
+    def _populate(self, model: str) -> None:
+        """(Re)build the table for one model.
+
+        The 0x20xx/0x30xx layout is model-specific, so the table has to be
+        rebuilt whenever the selected motor's model changes rather than
+        showing one model's names against another's registers.
+        """
+        self._model = model
+        self._params = P.params_for(model)
+        self._rows = {}
         self._suppress_edit = True
-        self.table.setRowCount(len(P.PARAMS))
-        for row, param in enumerate(P.PARAMS):
+        self.table.setRowCount(len(self._params))
+        for row, param in enumerate(self._params):
             self._rows[param.index] = row
 
             def cell(text, editable=False):
@@ -207,8 +218,21 @@ class ParamsView(QWidget):
         if motor is None:
             self.info.setText("No motor selected")
             return
-        self.info.setText(
-            f"Motor id {motor.motor_id} on {motor.link.channel} - model {motor.model}")
+
+        if motor.model != self._model:
+            self._populate(motor.model)
+            self._apply_filter()
+
+        note = (f"Motor id {motor.motor_id} on {motor.link.channel} - "
+                f"model {motor.model}")
+        if not P.has_table(motor.model):
+            note += ("   [no confirmed 0x20xx/0x30xx table for this model - "
+                     "config and observation rows are hidden and writes to "
+                     "them are blocked]")
+            self.info.setStyleSheet("color: #c0392b;")
+        else:
+            self.info.setStyleSheet("color: gray;")
+        self.info.setText(note)
         self.poller = ParamPoller(motor, self._on_sample,
                                   interval=self.rate.value())
         self.poller.set_indices(self._watched())
@@ -225,7 +249,7 @@ class ParamsView(QWidget):
     def _apply_filter(self) -> None:
         group = self.group_filter.currentData()
         needle = self.search.text().strip().lower()
-        for param in P.PARAMS:
+        for param in self._params:
             row = self._rows[param.index]
             visible = True
             if group is not None and param.group is not group:
@@ -244,7 +268,7 @@ class ParamsView(QWidget):
             return
         if self._reader is not None and self._reader.isRunning():
             return
-        indices = [p.index for p in P.PARAMS]
+        indices = [p.index for p in self._params]
         self.read_all_button.setEnabled(False)
         self._reader = ReadAllWorker(self.motor, indices, self)
         self._reader.value_ready.connect(self._set_value)
@@ -276,7 +300,7 @@ class ParamsView(QWidget):
 
     def _watched(self) -> list[int]:
         out = []
-        for param in P.PARAMS:
+        for param in self._params:
             item = self.table.item(self._rows[param.index], COL_WATCH)
             if item is not None and item.checkState() == Qt.Checked:
                 out.append(param.index)
@@ -319,7 +343,7 @@ class ParamsView(QWidget):
             QMessageBox.warning(self, "No motor", "Select a motor first.")
             return
         pending = []
-        for param in P.PARAMS:
+        for param in self._params:
             if not param.writable:
                 continue
             item = self.table.item(self._rows[param.index], COL_VALUE)
@@ -375,7 +399,7 @@ class ParamsView(QWidget):
         if not path:
             return
         rows = []
-        for param in P.PARAMS:
+        for param in self._params:
             item = self.table.item(self._rows[param.index], COL_VALUE)
             text = item.text().strip()
             if not text:
@@ -428,7 +452,7 @@ class ParamsView(QWidget):
             except (KeyError, ValueError):
                 continue
             table_row = self._rows.get(index)
-            param = P.get(index)
+            param = P.get(index, self._model)
             if table_row is None or param is None or not param.writable:
                 continue
             self._suppress_edit = True

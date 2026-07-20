@@ -87,9 +87,22 @@ def _protocol_roundtrip() -> str:
 
 def _param_table() -> str:
     from robstride import params as P
-    if len(P.PARAMS) < 140:
-        raise RuntimeError(f"parameter table looks truncated: {len(P.PARAMS)}")
-    return f"{len(P.PARAMS)} parameters"
+
+    counts = {}
+    for model in ("RS00", "RS03", "RS04"):
+        table = P.params_for(model)
+        if len(table) < 140:
+            raise RuntimeError(f"{model} table looks truncated: {len(table)}")
+        counts[model] = len(table)
+
+    # The layouts must stay distinct - see PARAMETERS.md. Flattening them back
+    # into one shared table is the failure this guards against.
+    if P.get(0x2009, "RS00").name != "motor_baud":
+        raise RuntimeError("RS00 0x2009 should be motor_baud, not CAN_ID")
+    if P.get(0x2009, "RS03").name != "CAN_ID":
+        raise RuntimeError("RS03 0x2009 should be CAN_ID")
+
+    return ", ".join(f"{m} {n}" for m, n in counts.items())
 
 
 def _qt() -> str:

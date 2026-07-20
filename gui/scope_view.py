@@ -78,6 +78,7 @@ class ScopeView(QWidget):
         self.channels: dict[int, Channel] = {}
         self._running = False
         self._t0 = time.time()
+        self._model = P.FALLBACK_MODEL
 
         self.sample_ready.connect(self._append_sample)
         self._build_ui()
@@ -87,15 +88,7 @@ class ScopeView(QWidget):
     def _build_ui(self) -> None:
         self.source_list = QListWidget()
         self.source_list.setSelectionMode(QListWidget.NoSelection)
-        for index, (label, unit) in FEEDBACK_SOURCES.items():
-            self._add_source_item(index, label, unit, checked=index in (-1, -2, -3))
-        for param in P.PARAMS:
-            if param.dtype == "string":
-                continue
-            self._add_source_item(param.index,
-                                  f"0x{param.index:04X}  {param.name}",
-                                  param.unit,
-                                  checked=param.index in P.SCOPE_DEFAULTS)
+        # Populated at the end of _build_ui: it needs self.plot to exist.
         self.source_list.itemChanged.connect(self._rebuild_channels)
 
         self.start_button = QPushButton("Start")
@@ -185,6 +178,33 @@ class ScopeView(QWidget):
         self._timer.timeout.connect(self._redraw)
         self._timer.start(50)
 
+        self._populate_sources(P.FALLBACK_MODEL)
+
+    def _populate_sources(self, model: str) -> None:
+        """Rebuild the channel list for one model.
+
+        Observation indices are model-specific, so offering RS04's list while
+        an RS00 is selected would plot the wrong registers under the right
+        names.
+        """
+        self._model = model
+        # Keep whatever the user had ticked, where it still exists.
+        previously = {i for i, _, _ in self._selected_sources()} \
+            if self.source_list.count() else set(P.SCOPE_DEFAULTS)
+
+        self.source_list.blockSignals(True)
+        self.source_list.clear()
+        for index, (label, unit) in FEEDBACK_SOURCES.items():
+            self._add_source_item(index, label, unit,
+                                  checked=index in previously or index in (-1, -2, -3))
+        for param in P.params_for(model):
+            if param.dtype == "string":
+                continue
+            self._add_source_item(param.index,
+                                  f"0x{param.index:04X}  {param.name}",
+                                  param.unit,
+                                  checked=param.index in previously)
+        self.source_list.blockSignals(False)
         self._rebuild_channels()
 
     def _add_source_item(self, index: int, label: str, unit: str,
@@ -211,7 +231,10 @@ class ScopeView(QWidget):
                                     self._on_feedback_frame)
             self.poller = ParamPoller(motor, self._on_poll_sample,
                                       interval=self.poll_rate.value())
-            self._rebuild_channels()
+            if motor.model != self._model:
+                self._populate_sources(motor.model)
+            else:
+                self._rebuild_channels()
         else:
             self.poller = None
 

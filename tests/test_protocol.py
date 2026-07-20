@@ -128,9 +128,77 @@ def test_kp_encoding_differs_between_small_and_large_models():
             != proto.float_to_uint(kp, large.kp_min, large.kp_max))
 
 
-def test_parameter_table_has_no_duplicate_indices():
-    seen = [p.index for p in P.PARAMS]
+@pytest.mark.parametrize("model", ["RS00", "RS03", "RS04"])
+def test_parameter_table_has_no_duplicate_indices(model):
+    seen = [p.index for p in P.params_for(model)]
     assert len(seen) == len(set(seen))
+
+
+def test_control_range_is_shared_by_every_model():
+    """0x70xx is verified identical across models - control code is portable."""
+    def control(model):
+        return {(p.index, p.name, p.dtype)
+                for p in P.params_for(model) if p.index >= 0x7000}
+
+    reference = control("RS04")
+    assert reference, "no control parameters found"
+    for model in ("RS00", "RS03"):
+        assert control(model) == reference
+
+
+def test_models_without_a_confirmed_table_expose_only_universal_ranges():
+    """Better to show nothing than another model's register names."""
+    unknown = P.params_for("RS_NONEXISTENT")
+    assert not any(P.is_model_specific(p.index) for p in unknown)
+    assert any(p.index == 0x7005 for p in unknown), "control range must remain"
+
+
+@pytest.mark.parametrize("model,index,name", [
+    # The headline hazard: the same index means different things per model.
+    ("RS00", 0x2009, "motor_baud"),
+    ("RS00", 0x200A, "CAN_ID"),
+    ("RS00", 0x200B, "CAN_MASTER"),
+    ("RS00", 0x200C, "CAN_TIMEOUT"),
+    ("RS03", 0x2009, "CAN_ID"),
+    ("RS03", 0x200A, "CAN_MASTER"),
+    ("RS03", 0x200B, "CAN_TIMEOUT"),
+    ("RS03", 0x2006, "Chasu_offset"),
+    ("RS04", 0x2009, "CAN_ID"),
+    ("RS04", 0x200A, "CAN_MASTER"),
+    ("RS04", 0x2006, "chasu_offset"),
+])
+def test_identity_critical_indices_per_model(model, index, name):
+    """Confirmed from each model's own manual, double-extracted.
+
+    Getting these wrong is not a cosmetic bug: writing 0x2009 on an RS00
+    believing it is the CAN id sets the baud rate instead, and the motor
+    vanishes from the bus.
+    """
+    param = P.get(index, model)
+    assert param is not None, f"0x{index:04X} missing from the {model} table"
+    assert param.name == name
+
+
+def test_can_id_is_not_at_the_same_index_on_every_model():
+    """A guard against anyone flattening these back into one shared table."""
+    assert P.get(0x2009, "RS00").name != P.get(0x2009, "RS03").name
+
+
+def test_writes_are_blocked_when_the_table_is_unconfirmed():
+    """The dangerous case: 0x2009 is CAN_ID on RS03 but motor_baud on RS00."""
+    from robstride.motor import Motor
+
+    class FakeLink:
+        host_id = 0xFD
+        channel = "test"
+        def add_listener(self, *a): pass
+        def send(self, *a): raise AssertionError("must not transmit")
+
+    motor = Motor(FakeLink(), 1, "RS_NONEXISTENT")
+    with pytest.raises(PermissionError, match="No confirmed parameter table"):
+        motor.write(0x2009, 5)
+    # Runtime control stays available - it is model-independent.
+    assert P.get(0x7005, "RS_NONEXISTENT") is not None
 
 
 def test_readonly_params_reject_writes():

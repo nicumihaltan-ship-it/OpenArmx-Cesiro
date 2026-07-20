@@ -95,7 +95,8 @@ RO, RW, CFG = Access.RO, Access.RW, Access.CFG
 IDENT, VER, CONF, OBS, CTRL = (Group.IDENTITY, Group.VERSION, Group.CONFIG,
                                Group.OBSERVE, Group.CONTROL)
 
-PARAMS: list[Param] = [
+# Identity and firmware version. Same layout on every model seen so far.
+_COMMON_HEAD: list[Param] = [
     # -- identity ---------------------------------------------------------
     _p(0x0000, "Name", "string", RW, IDENT, note="User label"),
     _p(0x0001, "BarCode", "string", RW, IDENT, note="Serial / barcode"),
@@ -110,6 +111,22 @@ PARAMS: list[Param] = [
     _p(0x1006, "AppBuildTime", "string", RO, VER),
     _p(0x1007, "AppCodeName", "string", RO, VER),
 
+]
+
+# --------------------------------------------------------------------------
+# Model-specific ranges.
+#
+# The 0x20xx and 0x30xx tables are NOT the same across models - RS00 and RS03
+# disagree on 21 of 40 config indices and 33 observation indices. Applying one
+# model's table to another silently misreads values, and worse, misdirects
+# writes: on RS00 the CAN id lives at 0x200A, while 0x2009 is motor_baud. A
+# user "changing the CAN id" from the wrong table would change the bitrate and
+# drop the motor off the bus.
+#
+# So these tables are keyed by model and never shared.
+# --------------------------------------------------------------------------
+
+_RS04_SPECIFIC: list[Param] = [
     # -- stored configuration (0x20xx, needs type-22 save) ----------------
     _p(0x2000, "echoPara1", "uint16", CFG, CONF, minimum=5, maximum=115),
     _p(0x2001, "echoPara2", "uint16", CFG, CONF, minimum=5, maximum=115),
@@ -272,6 +289,264 @@ PARAMS: list[Param] = [
     _p(0x3047, "coder_reg", "uint16", RO, OBS),
     _p(0x3048, "pos_cnt1", "uint16", RO, OBS),
 
+]
+
+# Extracted from RS00User Manual260713.pdf and RS03User Manual260713.pdf, each
+# read twice - once from flattened text, once from cell-aligned table
+# extraction - with both passes required to agree. Rows whose secondary fields
+# (min/max or remark) printed inconsistently are marked UNVERIFIED in their
+# note and carry no range.
+#
+# Note how far these diverge from RS04 and from each other: CAN_ID is 0x200A
+# on RS00 but 0x2009 on RS03, where RS00 has motor_baud.
+
+_RS00_SPECIFIC: list[Param] = [
+    _p(0x2000, "echoPara1", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2001, "echoPara2", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2002, "echoPara3", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2003, "echoPara4", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2004, "echoFreHz", "uint32", RW, CONF, minimum=1, maximum=10000),
+    _p(0x2005, "MechOffset", "float", CFG, CONF, minimum=-7, maximum=7, note="Motor magnetic encoder Angle offset"),
+    _p(0x2006, "MechPos_init", "float", RW, CONF, minimum=-50, maximum=50, note="Reserved parameter"),
+    _p(0x2007, "limit_torque", "float", RW, CONF, minimum=0, maximum=17, note="Torque limitation"),
+    _p(0x2008, "I_FW_MAX", "float", RW, CONF, minimum=0, maximum=33, note="Weak magnetic current value, default 0"),
+    _p(0x2009, "motor_baud", "uint8", CFG, CONF, minimum=0, maximum=20, note="Baud rate flag bit"),
+    _p(0x200A, "CAN_ID", "uint8", CFG, CONF, minimum=0, maximum=127, note="id of this object"),
+    _p(0x200B, "CAN_MASTER", "uint8", CFG, CONF, minimum=0, maximum=127, note="can host id"),
+    _p(0x200C, "CAN_TIMEOUT", "uint32", RW, CONF, minimum=0, maximum=100000, note="can timeout threshold. The default value is 0"),
+    _p(0x200D, "status2", "int16", RW, CONF, minimum=0, maximum=1500, note="Reserved parameter"),
+    _p(0x200E, "status3", "uint32", RW, CONF, minimum=1000, maximum=1000000, note="Reserved parameter"),
+    _p(0x200F, "status1", "float", RW, CONF, minimum=1, maximum=64, note="Reserved parameter"),
+    _p(0x2010, "Status6", "uint8", RW, CONF, minimum=0, maximum=1, note="Reserved parameter"),
+    _p(0x2011, "cur_filt_gain", "float", RW, CONF, minimum=0, maximum=1, note="Current filtering parameter"),
+    _p(0x2012, "cur_kp", "float", RW, CONF, minimum=0, maximum=200, note="Current kp"),
+    _p(0x2013, "cur_ki", "float", RW, CONF, minimum=0, maximum=200, note="Current ki"),
+    _p(0x2014, "spd_kp", "float", RW, CONF, minimum=0, maximum=200, note="Velocity kp"),
+    _p(0x2015, "spd_ki", "float", RW, CONF, minimum=0, maximum=200, note="Speed ki"),
+    _p(0x2016, "loc_kp", "float", RW, CONF, minimum=0, maximum=200, note="Position kp"),
+    _p(0x2017, "spd_filt_gain", "float", RW, CONF, minimum=0, maximum=1, note="Velocity filter parameter"),
+    _p(0x2018, "limit_spd", "float", RW, CONF, minimum=0, maximum=200, note="Location mode speed limit"),
+    _p(0x2019, "limit_cur", "float", RW, CONF, minimum=0, maximum=23, note="Position, Velocity mode current limit"),
+    _p(0x201A, "loc_ref_filt_gain", "float", RW, CONF, minimum=0, maximum=100, note="Reserved parameter"),
+    _p(0x201B, "limit_loc", "float", RW, CONF, minimum=0, maximum=100, note="Reserved parameter"),
+    _p(0x201C, "position_offset", "float", RW, CONF, minimum=0, maximum=27, note="High speed segment offset"),
+    _p(0x201D, "chasu_angle_offset", "float", RW, CONF, minimum=0, maximum=27, note="The low end is offset"),
+    _p(0x201E, "spd_step_value", "float", RW, CONF, minimum=0, maximum=150, note="Velocity-mode acceleration"),
+    _p(0x201F, "vel_max", "float", RW, CONF, minimum=0, maximum=20, note="PP mode speed"),
+    _p(0x2020, "acc_set", "float", RW, CONF, minimum=0, maximum=1000, note="PP mode acceleration"),
+    _p(0x2021, "zero_sta", "float", RW, CONF, note="Zero marker. CAVEAT: the manual's 3.3.4 table lists type=float, max=100, min=0, but zero_sta is  [UNVERIFIED: check against the manual]"),
+    _p(0x2022, "protocol_1", "uint8", RW, CONF, note="Protocol flag. Max/min cells are blank in the manual. Per section 4.1.12 the values are 0=privat"),
+    _p(0x2023, "damper", "uint8", RW, CONF, note="Damping switch. CAVEAT: the manual prints max=0 and min=20, which is inverted/nonsensical. Secti [UNVERIFIED: check against the manual]"),
+    _p(0x2024, "add_offset", "float", RW, CONF, note="Position offset parameter. CAVEAT: the manual prints max=-7 and min=7, i.e. the two columns are  [UNVERIFIED: check against the manual]"),
+    _p(0x3000, "timeUse0", "uint16", RO, OBS),
+    _p(0x3001, "timeUse1", "uint16", RO, OBS),
+    _p(0x3002, "timeUse2", "uint16", RO, OBS),
+    _p(0x3003, "timeUse3", "uint16", RO, OBS),
+    _p(0x3004, "encoderRaw", "int16", RO, OBS, note="Magnetic encoder sampling value"),
+    _p(0x3005, "mcuTemp", "int16", RO, OBS, note="mcu internal temperature, *10"),
+    _p(0x3006, "motorTemp", "int16", RO, OBS, note="Motor ntc temperature, *10"),
+    _p(0x3007, "vBus(mv)", "uint16", RO, OBS, note="Bus voltage"),
+    _p(0x3008, "adc1Offset", "int32", RO, OBS, note="adc sampling channel 1 Zero current bias"),
+    _p(0x3009, "adc2Offset", "int32", RO, OBS, note="adc sampling channel 2 Zero current bias"),
+    _p(0x300A, "adc1Raw", "uint16", RO, OBS, note="adc sampling value 1"),
+    _p(0x300B, "adc2Raw", "uint16", RO, OBS, note="adc sampling value 2"),
+    _p(0x300C, "VBUS", "float", RO, OBS, note="Bus voltage V"),
+    _p(0x300D, "cmdId", "float", RO, OBS, note="id ring instruction, A"),
+    _p(0x300E, "cmdIq", "float", RO, OBS, note="iq ring command, A"),
+    _p(0x300F, "cmdlocref", "float", RO, OBS, note="Position loop command, rad"),
+    _p(0x3010, "cmdspdref", "float", RO, OBS, note="Speed loop command, rad/s"),
+    _p(0x3011, "cmdTorque", "float", RO, OBS, note="Torque instruction, nm"),
+    _p(0x3012, "cmdPos", "float", RO, OBS, note="mit Protocol Angle instruction"),
+    _p(0x3013, "cmdVel", "float", RO, OBS, note="mit Protocol Speed instruction"),
+    _p(0x3014, "rotation", "int16", RO, OBS, note="Number of turns"),
+    _p(0x3015, "modPos", "float", RO, OBS, note="Motor uncounted coil mechanical Angle, rad"),
+    _p(0x3016, "mechPos", "float", RO, OBS, note="Load end loop mechanical Angle, rad"),
+    _p(0x3017, "mechVel", "float", RO, OBS, note="Load speed: rad/s"),
+    _p(0x3018, "elecPos", "float", RO, OBS, note="Electrical Angle"),
+    _p(0x3019, "ia", "float", RO, OBS, note="U-wire current, A"),
+    _p(0x301A, "ib", "float", RO, OBS, note="V-wire current, A"),
+    _p(0x301B, "ic", "float", RO, OBS, note="W-wire current, A"),
+    _p(0x301C, "timeout", "uint32", RO, OBS, note="Timeout counter value"),
+    _p(0x301D, "phaseOrder", "uint8", RO, OBS, note="Directional marking"),
+    _p(0x301E, "iqf", "float", RO, OBS, note="iq filter value, A"),
+    _p(0x301F, "boardTemp", "int16", RO, OBS, note="Plate temperature, *10"),
+    _p(0x3020, "iq", "float", RO, OBS, note="iq Original value, A"),
+    _p(0x3021, "id", "float", RO, OBS, note="id Original value, A"),
+    _p(0x3022, "faultSta", "uint32", RO, OBS, note="Fault status value"),
+    _p(0x3023, "warnSta", "uint32", RO, OBS, note="Warning status value"),
+    _p(0x3024, "drv_fault", "uint16", RO, OBS, note="The driver chip fault value is 1"),
+    _p(0x3025, "drv_temp", "int16", RO, OBS, note="The driver chip fault value is 2"),
+    _p(0x3026, "Uq", "float", RO, OBS, note="Q-axis voltage"),
+    _p(0x3027, "Ud", "float", RO, OBS, note="D-axis voltage"),
+    _p(0x3028, "dtc_u", "float", RO, OBS, note="The duty cycle of the U-phase output"),
+    _p(0x3029, "dtc_v", "float", RO, OBS, note="The duty cycle of the V-phase output"),
+    _p(0x302A, "dtc_w", "float", RO, OBS, note="The duty cycle of the W-phase output"),
+    _p(0x302B, "v_bus", "float", RO, OBS, note="Vbus in the closed loop"),
+    _p(0x302C, "torque_fdb", "float", RO, OBS, note="Torque feedback value, nm"),
+    _p(0x302D, "rated_i", "float", RO, OBS, note="Rated current of motor"),
+    _p(0x302E, "limit_i", "float", RO, OBS, note="The motor limits the maximum current"),
+    _p(0x302F, "spd_ref", "float", RO, OBS, note="Motor speed expectation"),
+    _p(0x3030, "spd_reff", "float", RO, OBS, note="Motor speed expectation 2"),
+    _p(0x3031, "zero_fault", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3032, "chasu_coder_raw", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3033, "chasu_angle", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3034, "as_angle", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3035, "vel_max", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3036, "judge", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3037, "position", "float", RO, OBS, note="Position value"),
+    _p(0x3038, "chasu_angle_init", "float", RO, OBS, note="Angle initialization"),
+    _p(0x3039, "chasu_angle_out", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x303A, "motormechinit", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x303B, "mech_angle_init2", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x303C, "mech_angle_rotat", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x303D, "fault1", "uint32", RO, OBS, note="Log failure"),
+    _p(0x303E, "fault2", "uint32", RO, OBS, note="Log failure"),
+    _p(0x303F, "fault3", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3040, "fault4", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3041, "fault5", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3042, "fault6", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3043, "fault7", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3044, "fault8", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3045, "ElecOffset", "float", RO, OBS, note="electrical Angle offset"),
+    _p(0x3046, "mcOverTemp", "int16", RO, OBS, note="Overtemperature threshold"),
+    _p(0x3047, "Kt_Nm/Amp", "float", RO, OBS, note="Moment coefficient"),
+    _p(0x3048, "Tqcali_Type", "uint8", RO, OBS, note="Motor type"),
+    _p(0x3049, "low_position", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x304A, "theta_mech_1", "float", RO, OBS, note="Type 2 Low speed Angle"),
+    _p(0x304B, "instep", "float", RO, OBS, note="Motor protection decision parameters"),
+    _p(0x304C, "adc0ffset_1", "int32", RO, OBS, note="adc sampling channel 1 Zero current bias"),
+    _p(0x304D, "adc0ffset_2", "int32", RO, OBS, note="adc sampling channel 2 Zero current bias"),
+    _p(0x304E, "pos_cnt1", "uint16", RO, OBS, note="System parameters"),
+    _p(0x304F, "H'", "uint8", RO, OBS, note="System parameters. Name is printed as the single character H followed by a right single quote (U [UNVERIFIED: check against the manual]"),
+]
+
+_RS03_SPECIFIC: list[Param] = [
+    _p(0x2000, "echoPara1", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2001, "echoPara2", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2002, "echoPara3", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2003, "echoPara4", "uint16", CFG, CONF, minimum=5, maximum=74),
+    _p(0x2004, "echoFreHz", "uint32", RW, CONF, minimum=1, maximum=10000),
+    _p(0x2005, "MechOffset", "float", CFG, CONF, minimum=-7, maximum=7, note="Motor magnetic encoder Angle offset"),
+    _p(0x2006, "Chasu_offset", "float", RW, CONF, minimum=-50, maximum=50, note="Reserved parameter. NOTE: RS00 has MechPos_init at this index with identical type/min/max/remark"),
+    _p(0x2007, "Status1", "float", RW, CONF, minimum=0, maximum=17, note="Torque limitation. NOTE: RS00 names this same row limit_torque; RS03 prints Status1. Max 17 also"),
+    _p(0x2008, "I_FW_MAX", "float", RW, CONF, minimum=0, maximum=33, note="Weak magnetic current value, default 0"),
+    _p(0x2009, "CAN_ID", "uint8", CFG, CONF, note="Remark column prints 'Motor index, marking the joint position of the motor'. NAME AND INDEX CONF [UNVERIFIED: check against the manual]"),
+    _p(0x200A, "CAN_MASTER", "uint8", CFG, CONF, note="Remark column prints 'id of this object' (which describes CAN_ID, not CAN_MASTER). Name and inde [UNVERIFIED: check against the manual]"),
+    _p(0x200B, "CAN_TIMEOUT", "uint8", CFG, CONF, note="Remark column prints 'can host id' (which describes CAN_MASTER). Name and index confirmed. CAVEA [UNVERIFIED: check against the manual]"),
+    _p(0x200C, "status2", "uint32", RW, CONF, note="Remark column prints 'can timeout threshold. The default value is 0'. Name and index confirmed a [UNVERIFIED: check against the manual]"),
+    _p(0x200D, "status3", "int16", RW, CONF, minimum=0, maximum=1500, note="Reserved parameter"),
+    _p(0x200E, "Status4", "uint32", RW, CONF, minimum=1000, maximum=1000000, note="Reserved parameter"),
+    _p(0x200F, "Status5", "float", RW, CONF, minimum=1, maximum=64, note="Reserved parameter"),
+    _p(0x2010, "Status6", "uint8", RW, CONF, minimum=0, maximum=1, note="Reserved parameter"),
+    _p(0x2011, "cur_filt_gain", "float", RW, CONF, minimum=0, maximum=1, note="Current filtering parameter"),
+    _p(0x2012, "cur_kp", "float", RW, CONF, minimum=0, maximum=200, note="Current kp"),
+    _p(0x2013, "cur_ki", "float", RW, CONF, minimum=0, maximum=200, note="Current ki"),
+    _p(0x2014, "spd_kp", "float", RW, CONF, minimum=0, maximum=200, note="Velocity kp"),
+    _p(0x2015, "spd_ki", "float", RW, CONF, minimum=0, maximum=200, note="Speed ki"),
+    _p(0x2016, "loc_kp", "float", RW, CONF, minimum=0, maximum=200, note="Position kp"),
+    _p(0x2017, "spd_filt_gain", "float", RW, CONF, minimum=0, maximum=1, note="Velocity filter parameter"),
+    _p(0x2018, "limit_spd", "float", RW, CONF, minimum=0, maximum=200, note="Location mode speed limit"),
+    _p(0x2019, "limit_cur", "float", RW, CONF, minimum=0, maximum=23, note="Position, Velocity mode current limit"),
+    _p(0x201A, "limit_a", "float", RW, CONF, minimum=0, maximum=100, note="Reserved parameter"),
+    _p(0x201B, "fault1", "float", RW, CONF, minimum=0, maximum=100, note="Reserved parameter"),
+    _p(0x201C, "fault2", "float", RW, CONF, minimum=0, maximum=27, note="High speed segment offset"),
+    _p(0x201D, "fault3", "float", RW, CONF, minimum=0, maximum=27, note="The low end is offset"),
+    _p(0x201E, "fault4", "float", RW, CONF, minimum=0, maximum=150, note="Velocity-mode acceleration"),
+    _p(0x201F, "fault5", "float", RW, CONF, minimum=0, maximum=20, note="PP mode speed"),
+    _p(0x2020, "fault6", "float", RW, CONF, minimum=0, maximum=1000, note="PP mode acceleration"),
+    _p(0x2021, "fault7", "float", RW, CONF, minimum=0, maximum=100, note="Zero marker"),
+    _p(0x2022, "baud", "uint8", RW, CONF, minimum=0, maximum=10, note="Baud rate flag. This is RS03's baud-rate parameter; note it lives at 0x2022 here, NOT at 0x2009 "),
+    _p(0x2023, "zero_sta", "uint8", RW, CONF, note="Zero point flag. Max/min cells are blank in the manual. Per section 4.2.2, 0 => power-on positio"),
+    _p(0x2024, "position_offset", "uint8", RW, CONF, note="Position offset. CAVEAT: dtype printed as uint8, but max is 27 with a positional/radian meaning  [UNVERIFIED: check against the manual]"),
+    _p(0x2025, "protocol_1", "uint8", RW, CONF, note="Protocol flag. Max/min cells blank in the manual. Per section 4.1.12: 0=private (default), 1=CAN"),
+    _p(0x2026, "damper", "uint8", RW, CONF, note="Damping switch. CAVEAT: the manual prints max=0 and min=20, which is inverted/nonsensical (same  [UNVERIFIED: check against the manual]"),
+    _p(0x2027, "add_offset", "float", RW, CONF, note="Position offset parameter. CAVEAT: the manual prints max=-7 and min=7, i.e. the columns are tran [UNVERIFIED: check against the manual]"),
+    _p(0x3000, "timeUse0", "uint16", RO, OBS),
+    _p(0x3001, "timeUse1", "uint16", RO, OBS),
+    _p(0x3002, "timeUse2", "uint16", RO, OBS),
+    _p(0x3003, "timeUse3", "uint16", RO, OBS),
+    _p(0x3004, "encoderRaw", "int16", RO, OBS, note="Magnetic encoder sampling value"),
+    _p(0x3005, "mcuTemp", "int16", RO, OBS, note="mcu internal temperature, *10"),
+    _p(0x3006, "motorTemp", "int16", RO, OBS, note="Motor ntc temperature, *10"),
+    _p(0x3007, "vBus(mv)", "uint16", RO, OBS, note="Bus voltage"),
+    _p(0x3008, "adc1Offset", "int32", RO, OBS, note="adc sampling channel 1 Zero current bias"),
+    _p(0x3009, "adc2Offset", "int32", RO, OBS, note="adc sampling channel 2 Zero current bias"),
+    _p(0x300A, "adc1Raw", "uint16", RO, OBS, note="adc sampling value 1"),
+    _p(0x300B, "adc2Raw", "uint16", RO, OBS, note="adc sampling value 2"),
+    _p(0x300C, "VBUS", "float", RO, OBS, note="Bus voltage V"),
+    _p(0x300D, "cmdId", "float", RO, OBS, note="id ring instruction, A"),
+    _p(0x300E, "cmdIq", "float", RO, OBS, note="iq ring command, A"),
+    _p(0x300F, "cmdlocref", "float", RO, OBS, note="Position loop command, rad"),
+    _p(0x3010, "cmdspdref", "float", RO, OBS, note="Speed loop command, rad/s"),
+    _p(0x3011, "cmdTorque", "float", RO, OBS, note="Torque instruction, nm"),
+    _p(0x3012, "cmdPos", "float", RO, OBS, note="mit Protocol Angle instruction"),
+    _p(0x3013, "cmdVel", "float", RO, OBS, note="mit Protocol Speed instruction"),
+    _p(0x3014, "rotation", "int16", RO, OBS, note="Number of turns"),
+    _p(0x3015, "modPos", "float", RO, OBS, note="Motor uncounted coil mechanical Angle, rad"),
+    _p(0x3016, "mechPos", "float", RO, OBS, note="Load end loop mechanical Angle, rad"),
+    _p(0x3017, "mechVel", "float", RO, OBS, note="Load speed: rad/s"),
+    _p(0x3018, "elecPos", "float", RO, OBS, note="Electrical Angle"),
+    _p(0x3019, "ia", "float", RO, OBS, note="U-wire current, A"),
+    _p(0x301A, "ib", "float", RO, OBS, note="V-wire current, A"),
+    _p(0x301B, "ic", "float", RO, OBS, note="W-wire current, A"),
+    _p(0x301C, "timeout", "uint32", RO, OBS, note="Timeout counter value"),
+    _p(0x301D, "phaseOrder", "uint8", RO, OBS, note="Directional marking"),
+    _p(0x301E, "iqf", "float", RO, OBS, note="iq filter value, A"),
+    _p(0x301F, "boardTemp", "int16", RO, OBS, note="Plate temperature, *10"),
+    _p(0x3020, "iq", "float", RO, OBS, note="iq Original value, A"),
+    _p(0x3021, "id", "float", RO, OBS, note="id Original value, A"),
+    _p(0x3022, "faultSta", "uint32", RO, OBS, note="Fault status value"),
+    _p(0x3023, "warnSta", "uint32", RO, OBS, note="Warning status value"),
+    _p(0x3024, "drv_fault", "uint16", RO, OBS, note="The driver chip fault value is 1"),
+    _p(0x3025, "drv_temp", "int16", RO, OBS, note="The driver chip fault value is 2"),
+    _p(0x3026, "Uq", "float", RO, OBS, note="Q-axis voltage"),
+    _p(0x3027, "as_angle", "float", RO, OBS, note="Magnetic encoder initial angle"),
+    _p(0x3028, "cs_angle", "float", RO, OBS, note="Differential magnetic encoder initial angle"),
+    _p(0x3029, "chasu_angle", "float", RO, OBS, note="Differential angle"),
+    _p(0x302A, "v_bus", "float", RO, OBS, note="Motor voltage"),
+    _p(0x302B, "ElecOffset", "float", RO, OBS, note="Electrical angle offset"),
+    _p(0x302C, "torque_fdb", "float", RO, OBS, note="Torque feedback value, nm"),
+    _p(0x302D, "rated_i", "float", RO, OBS, note="Rated current of motor"),
+    _p(0x302E, "MechPos_init", "float", RO, OBS, note="Motor retention parameters. NOTE: on RS00, MechPos_init is a writable 0x2006 config parameter; o"),
+    _p(0x302F, "instep", "float", RO, OBS, note="Motor protection parameters"),
+    _p(0x3030, "status", "uint8", RO, OBS, note="Reserved parameters"),
+    _p(0x3031, "cmdlocref", "float", RO, OBS, note="Position setpoint"),
+    _p(0x3032, "vel_max", "float", RO, OBS, note="Motor speed setpoint"),
+    _p(0x3033, "fault1", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3034, "fault2", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3035, "fault3", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3036, "fault4", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3037, "fault5", "float", RO, OBS, note="Log failure"),
+    _p(0x3038, "fault6", "uint32", RO, OBS, note="Log failure"),
+    _p(0x3039, "fault7", "uint32", RO, OBS, note="Log failure"),
+    _p(0x303A, "fault8", "uint32", RO, OBS, note="Log failure"),
+    _p(0x303B, "mcOverTemp", "int16", RO, OBS, note="Over-temperature threshold"),
+    _p(0x303C, "Kt_Nm/Amp", "float", RO, OBS, note="Torque coefficient"),
+    _p(0x303D, "Tqcali_Type", "uint8", RO, OBS, note="Motor type"),
+    _p(0x303E, "theta_mech_1", "float", RO, OBS, note="Type 2 low-speed angle"),
+    _p(0x303F, "adc0ffset_1", "uint32", RO, OBS, note="ADC sampling channel 1 zero current offset"),
+    _p(0x3040, "adc0ffset_2", "uint32", RO, OBS, note="ADC sampling channel 2 zero current offset"),
+    _p(0x3041, "can_status", "uint8", RO, OBS, note="CAN status"),
+    _p(0x3042, "position", "float", RO, OBS, note="Initialization position"),
+    _p(0x3043, "chasu_angle_init", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3044, "chasu_angle_out", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3045, "motormechinit", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3046, "mech_angle_init2", "float", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3047, "mech_angle_rotat", "int16", RO, OBS, note="Motor position determination parameters"),
+    _p(0x3048, "coder_reg", "uint16", RO, OBS, note="System parameters"),
+    _p(0x3049, "pos_cnt1", "uint16", RO, OBS, note="System parameters"),
+]
+
+# --------------------------------------------------------------------------
+# Runtime control (0x70xx).
+#
+# Verified identical between RS00, RS03 and RS04 - all 29 indices agree. This
+# is the range that matters for actual motion control, so the good news is
+# that control code is model-portable; only configuration and diagnostics are
+# not.
+# --------------------------------------------------------------------------
+
+_CONTROL: list[Param] = [
     # -- runtime control parameters (0x70xx) ------------------------------
     _p(0x7005, "run_mode", "uint8", RW, CTRL, minimum=0, maximum=5,
        note="0 operation, 1 position PP, 2 velocity, 3 current, 5 position CSP"),
@@ -321,16 +596,55 @@ PARAMS: list[Param] = [
        note="PP mode deceleration, default 10"),
 ]
 
-BY_INDEX: dict[int, Param] = {p.index: p for p in PARAMS}
-BY_NAME: dict[str, Param] = {}
-for _param in PARAMS:
-    # 0x20xx/0x70xx share several names; the 0x70xx entry is the runtime one.
-    BY_NAME.setdefault(_param.name, _param)
+# --------------------------------------------------------------------------
+# Public API - everything is keyed by model
+# --------------------------------------------------------------------------
+
+#: Model-specific 0x20xx / 0x30xx tables. A model absent from here has no
+#: confirmed table, and only the common and control ranges are exposed for it.
+MODEL_SPECIFIC: dict[str, list[Param]] = {
+    "RS00": _RS00_SPECIFIC,
+    "RS03": _RS03_SPECIFIC,
+    "RS04": _RS04_SPECIFIC,
+}
+
+FALLBACK_MODEL = "RS04"
 
 
-def get(index: int) -> Param | None:
-    return BY_INDEX.get(index)
+def has_table(model: str) -> bool:
+    """True when this model's config/observation table has been confirmed."""
+    return model in MODEL_SPECIFIC
 
 
-#: Sensible default channel set for the oscilloscope.
+def params_for(model: str) -> list[Param]:
+    """The full parameter list for one model.
+
+    Models without a confirmed table get only the ranges known to be
+    universal, rather than another model's table pretending to fit.
+    """
+    return _COMMON_HEAD + MODEL_SPECIFIC.get(model, []) + _CONTROL
+
+
+def index_map(model: str) -> dict[int, Param]:
+    return {p.index: p for p in params_for(model)}
+
+
+_CACHE: dict[str, dict[int, Param]] = {}
+
+
+def get(index: int, model: str = FALLBACK_MODEL) -> Param | None:
+    """Look up one parameter for a given model."""
+    table = _CACHE.get(model)
+    if table is None:
+        table = _CACHE[model] = index_map(model)
+    return table.get(index)
+
+
+def is_model_specific(index: int) -> bool:
+    """True for indices whose meaning depends on the motor model."""
+    return 0x2000 <= index < 0x4000
+
+
+#: Sensible default channel set for the oscilloscope, in common/control ranges
+#: plus RS04 observation indices. Callers should filter to params_for(model).
 SCOPE_DEFAULTS = [0x3017, 0x3018, 0x302C, 0x3021, 0x3022, 0x3006, 0x300C]

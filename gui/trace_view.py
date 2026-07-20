@@ -52,9 +52,14 @@ def describe(entry: TraceEntry) -> str:
         if ct in (proto.CommType.PARAM_READ, proto.CommType.PARAM_WRITE) \
                 and len(data) >= 8:
             index = struct.unpack("<H", data[0:2])[0]
+            verb = "read" if ct == proto.CommType.PARAM_READ else "write"
+            # The trace sees frames from every motor on the bus and cannot
+            # know each one's model, so naming a model-specific index here
+            # would be a guess. Only the universal ranges get a name.
+            if P.is_model_specific(index):
+                return f"{verb} 0x{index:04X} (model-specific)"
             param = P.get(index)
             name = param.name if param else "unknown"
-            verb = "read" if ct == proto.CommType.PARAM_READ else "write"
             if param is not None and any(data[4:8]):
                 try:
                     value = param.decode(data[4:8])
