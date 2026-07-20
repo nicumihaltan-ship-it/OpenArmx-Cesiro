@@ -116,10 +116,13 @@ PARAMS: list[Param] = [
     _p(0x2002, "echoPara3", "uint16", CFG, CONF, minimum=5, maximum=115),
     _p(0x2003, "echoPara4", "uint16", CFG, CONF, minimum=5, maximum=115),
     _p(0x2004, "echoFreHz", "uint32", RW, CONF, "Hz", minimum=1, maximum=10000),
+    # RS02 glosses this as the encoder angle offset, RS03 as the low-speed-end
+    # position offset. The manuals disagree; treat with care.
     _p(0x2005, "MechOffset", "float", RW, CONF, "rad", minimum=-50, maximum=50,
-       note="Magnetic encoder angle offset"),
+       note="Encoder angle offset (calibration output - do not hand-edit)"),
+    # Not reserved: 差速偏置值, the calibrated zero for the chasu encoder.
     _p(0x2006, "chasu_offset", "float", RW, CONF, "rad", minimum=-50, maximum=50,
-       note="Reserved"),
+       note="Chasu encoder zero offset (calibration output - do not hand-edit)"),
     _p(0x2007, "Status1", "float", CFG, CONF, "Nm", minimum=-10, maximum=10,
        note="Torque limitation - do not change"),
     _p(0x2008, "I_FW_MAX", "float", RW, CONF, "A", minimum=0, maximum=33,
@@ -177,10 +180,15 @@ PARAMS: list[Param] = [
     _p(0x3001, "timeUse1", "uint16", RO, OBS),
     _p(0x3002, "timeUse2", "uint16", RO, OBS),
     _p(0x3003, "timeUse3", "uint16", RO, OBS),
-    _p(0x3004, "encoderRaw", "uint16", RO, OBS, note="Magnetic encoder sample"),
+    _p(0x3004, "encoderRaw", "uint16", RO, OBS,
+       note="Rotor-side magnetic encoder raw sample, 0-16383"),
     _p(0x3005, "mcuTemp", "int16", RO, OBS, "C", scale=0.1),
     _p(0x3006, "motorTemp", "int16", RO, OBS, "C", scale=0.1, note="Motor NTC"),
-    _p(0x3007, "encoder2raw", "uint16", RO, OBS),
+    # The English manual calls this "Bus voltage", which is a mistranslation:
+    # the Chinese reads 差速磁编码器采样值, and RS00/RS05 name the register
+    # chasu_coder_raw outright.
+    _p(0x3007, "encoder2raw", "uint16", RO, OBS,
+       note="Chasu (output-side) magnetic encoder raw sample"),
     _p(0x3008, "adc1Offset", "int32", RO, OBS),
     _p(0x3009, "adc2Offset", "int32", RO, OBS),
     _p(0x300A, "adc1Raw", "uint16", RO, OBS),
@@ -194,8 +202,12 @@ PARAMS: list[Param] = [
     _p(0x3013, "cmdPos", "float", RO, OBS, "rad", note="MIT protocol angle command"),
     _p(0x3014, "cmdVel", "float", RO, OBS, "rad/s", note="MIT protocol speed command"),
     _p(0x3015, "rotation", "int16", RO, OBS, note="Turn count"),
-    _p(0x3016, "modPos", "float", RO, OBS, "rad", note="Uncounted mechanical angle"),
-    _p(0x3017, "mechPos", "float", RO, OBS, "rad", note="Load-side mechanical angle"),
+    _p(0x3016, "modPos", "float", RO, OBS, "rad",
+       note="Rotor angle, NOT turn-counted (wraps every motor revolution)"),
+    # English "load end loop mechanical Angle" mistranslates 计圈 - this is
+    # turn-counted, i.e. the multi-turn output position.
+    _p(0x3017, "mechPos", "float", RO, OBS, "rad",
+       note="Output angle, turn-counted (multi-turn) - use this for control"),
     _p(0x3018, "mechVel", "float", RO, OBS, "rad/s", note="Load-side speed"),
     _p(0x3019, "elecPos", "float", RO, OBS, "rad", note="Electrical angle"),
     _p(0x301A, "ia", "float", RO, OBS, "A", note="U phase current"),

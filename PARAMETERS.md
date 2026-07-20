@@ -1,10 +1,21 @@
 # RobStride parameter reference
 
 Notes on what the parameters actually mean, beyond the manual's often terse or
-repeated descriptions. Everything here is marked as either **documented**
+repeated descriptions. Everything here is marked as either **confirmed**
 (stated in a RobStride manual), **derived** (arithmetic that checks out against
 the manual's own sample values), or **inferred** (reasoning from naming and
 hardware, not confirmed).
+
+> **Read the Chinese manuals.** RobStride publish current manuals for every
+> model at
+> [github.com/RobStride/Product_Information](https://github.com/RobStride/Product_Information)
+> (`产品资料/RS0N/`). They are consistently more precise than the English
+> translations, which contain outright errors — `0x3007` is labelled "Bus
+> voltage" in English when it is actually the second encoder's raw sample, and
+> `mechPos` is described as a single-turn value when it is multi-turn. Cross-
+> reading models helps too: each manual leaks different fragments of the same
+> register map. This matters for the OpenArmX arms, which mix RS00/01/02 with
+> RS04.
 
 ## How the address space is organised
 
@@ -76,33 +87,67 @@ output revolution. So at power-on the firmware knows the motor angle precisely
 and the output angle only modulo 1/9th of a turn. It cannot tell which of the
 nine motor turns the output shaft is currently in.
 
-**Documented:** the manual refers to a second, *"differential magnetic
-encoder"* (`cs_angle`, `chasu_angle`).
+**Confirmed** — from RobStride's Chinese-language manuals, which are more
+explicit than the English translations
+([github.com/RobStride/Product_Information](https://github.com/RobStride/Product_Information)):
 
-**Inferred:** this is a vernier (nonius) arrangement — a second encoder geared
-differently from the first, so the *difference* between the two readings is
-unique across the whole output revolution. That difference resolves the turn
-number, turning a single-turn absolute encoder into a multi-turn absolute one.
-"chasu" is pinyin (差数 / 差速, "difference"). This explains the hardware but is
-not stated anywhere in the manual.
+- There really are **two magnetic encoders**. The RS02 bill of materials lists
+  磁编码器芯片 **AS5047P — 2 PCS**; RS03 the same. Both 14-bit single-turn
+  absolute (14bit 单圈绝对值).
+- The second one is the **差速磁编码器** ("chasu magnetic encoder").
+  `0x3007 encoder2raw` is its raw sample — the English table's "Bus voltage"
+  there is simply a mistranslation. RS00 and RS05 name the register
+  `chasu_coder_raw` outright.
+- **chasu (差速) sits on the low-speed, i.e. output, end.** The RS00 config
+  table pairs `position_offset` = 高速段偏置 (high-speed *stage* offset) with
+  `chasu_angle_offset` = 低速端偏置 (low-speed *end* offset). That is the
+  firmware's own vocabulary.
+- The Chinese names for the three registers: `as_angle` = 磁编初始角 (encoder
+  initial angle), `cs_angle` = 差速磁编初始角 (**chasu** encoder initial
+  angle), `chasu_angle` = 差速角度.
+- Power-on absolute range is **one output revolution** — 0–2π by default,
+  −π–π with `zero_sta` = 1. That is precisely what a rotor + output encoder
+  pair buys you.
+
+So the arrangement is a **coarse/fine pair**: a fine encoder on the fast rotor
+and a coarse one on the slow output shaft, turning at a 9:1 speed ratio. The
+output-side encoder says roughly where the joint is, the rotor-side one says
+precisely where within that, and together they give absolute position across
+the full output turn.
+
+An earlier draft of this document called it a *vernier/nonius* scheme. That
+was wrong and has been retired: 差速 means the two encoders turn at *different
+speeds*, whereas classic nonius uses two *nearly equal* ratios. Coarse/fine is
+the accurate description.
+
+**Still not confirmed:** the actual algorithm. No source states how
+`as_angle`, `cs_angle` and `chasu_angle` combine to produce `rotation`.
+Whether it is a phase-difference computation or a straightforward coarse
+quadrant lookup from the output encoder remains inference.
 
 ### The registers
 
 | Index | Name | Side | Role |
 |---|---|---|---|
-| `0x3004` | `encoderRaw` | motor | Raw 14-bit encoder count, 0–16383 |
-| `0x3028` | `as_angle` | motor | Main encoder angle at initialisation |
-| `0x3029` | `cs_angle` | — | Differential encoder angle at initialisation |
-| `0x302A` | `chasu_angle` | — | Difference between the two, raw |
-| `0x2006` | `chasu_offset` | — | Calibrated zero for that difference (**flash**) |
-| `0x3033` | `chasu_angle_init` | — | Difference after the offset is removed |
-| `0x3034` | `chasu_angle_out` | motor | That difference scaled by the gear ratio |
-| `0x3036` | `mech_angle_init2` | load | Resolved output angle at initialisation |
-| `0x3035` | `motormechinit` | motor | Same, expressed motor-side |
+| `0x3004` | `encoderRaw` | rotor | Raw 14-bit count from the rotor encoder, 0–16383 |
+| `0x3007` | `encoder2raw` | output | Raw count from the chasu (output-side) encoder |
+| `0x3028` | `as_angle` | rotor | Rotor encoder angle at initialisation |
+| `0x3029` | `cs_angle` | output | Chasu encoder angle at initialisation |
+| `0x302A` | `chasu_angle` | output | Chasu angle, raw |
+| `0x2006` | `chasu_offset` | output | Calibrated zero for it (**flash, writable**) |
+| `0x3033` | `chasu_angle_init` | output | Chasu angle after the offset is removed |
+| `0x3034` | `chasu_angle_out` | rotor | That angle scaled by the gear ratio |
+| `0x3036` | `mech_angle_init2` | output | Resolved output angle at initialisation |
+| `0x3035` | `motormechinit` | rotor | Same, expressed rotor-side |
 | `0x3037` | `mech_angle_rotat` | — | Resolved turn number (int16) |
-| `0x3015` | `rotation` | — | Running turn count during operation |
-| `0x3016` | `modPos` | motor | Live single-turn motor angle |
-| `0x3017` | `mechPos` | load | Live output angle — the useful one |
+| `0x3015` | `rotation` | — | 圈数, running turn count |
+| `0x3016` | `modPos` | rotor | 未计圈 — **non**-turn-counted rotor angle |
+| `0x3017` | `mechPos` | output | 计圈 — **turn-counted** output angle, the useful one |
+
+Note on `mechPos`: the English manual renders it "load end loop mechanical
+Angle", which reads as a single-turn value. The Chinese is 负载端**计圈**机械角度
+— *turn-counted*. `mechPos` is the **multi-turn** output position, which is
+what you want for control; `modPos` is the wrapped rotor angle.
 
 ### The arithmetic — derived, and it checks out
 
@@ -130,6 +175,13 @@ evidence for the reading above. Note the `_init` family is internally
 consistent because it is a single power-on snapshot; the *live* values
 (`modPos`, `mechPos`, `position`) were sampled at different instants in the
 manual's table and do not cross-check.
+
+This arithmetic matters for a second reason. In the RS04 English manual the
+description column in this block is misaligned by one row against the Chinese
+original, so the name-to-register mapping there cannot be taken on trust. The
+relations above were derived from the *values*, and they come out exact using
+the names as labelled — which independently corroborates that the mapping is
+right for at least these five registers.
 
 ### How this is used in control — the short answer: it isn't
 
@@ -184,12 +236,17 @@ for a more accurate reference.
 The claims above marked *inferred* can be settled empirically with the
 oscilloscope tab, and you have the motors:
 
-**Is it really a vernier pair?** Plot `0x3028 as_angle` and `0x3029 cs_angle`
-while slowly back-driving the output shaft through a full revolution with the
-motor unpowered. If the hypothesis holds, both ramp and wrap, but at different
-rates, and their difference (`0x302A`) advances monotonically across the whole
-output turn without repeating. If the two track each other identically, the
-hypothesis is wrong.
+**Confirm the 9:1 coarse/fine split.** Plot `0x3004 encoderRaw` against
+`0x3007 encoder2raw` while slowly back-driving the output shaft through one
+full revolution, motor unpowered. The rotor encoder should wrap **nine times**
+for one wrap of the chasu encoder. That single plot settles the architecture.
+
+**How does the turn number get resolved?** This is the part no source
+documents. Plot `0x302A chasu_angle` and `0x3037 mech_angle_rotat` over the
+same slow revolution and watch where the turn number steps. If it steps at
+even 1/9th intervals of the chasu angle, it is a straight quadrant lookup from
+the output encoder; anything more elaborate would show up as a different
+pattern.
 
 **Does the turn resolution repeat?** Park the joint, note `0x3037` and `0x3036`,
 power-cycle, read again. Repeat five times. Same values each time means the
