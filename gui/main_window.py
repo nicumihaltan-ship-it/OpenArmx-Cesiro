@@ -6,7 +6,8 @@ import logging
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDockWidget, QLabel, QMainWindow, QMessageBox, QStatusBar, QTabWidget,
+    QComboBox, QDockWidget, QLabel, QMainWindow, QMessageBox, QStatusBar,
+    QTabWidget, QToolBar,
 )
 
 from robstride import unverified
@@ -16,6 +17,7 @@ from .control_view import ControlView
 from .params_view import ParamsView
 from .scope_view import ScopeView
 from .trace_view import TraceView
+from .units import units
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +38,8 @@ class MainWindow(QMainWindow):
         self.scope_view = ScopeView()
         self.trace_view = TraceView()
         self.control_view = ControlView()
+
+        self._build_toolbar()
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.params_view, "Parameters")
@@ -59,6 +63,27 @@ class MainWindow(QMainWindow):
         self._stats_timer.start(500)
 
         QTimer.singleShot(400, self._warn_unverified_models)
+
+    # -- construction -----------------------------------------------------
+
+    def _build_toolbar(self) -> None:
+        """The angle-unit selector, which every tab honours."""
+        self.angle_units = QComboBox()
+        self.angle_units.addItem("Degrees", True)
+        self.angle_units.addItem("Radians", False)
+        self.angle_units.setCurrentIndex(0 if units.degrees else 1)
+        self.angle_units.setToolTip(
+            "Display and entry only. The protocol, the parameter files and "
+            "the manuals are all radians, and exports stay canonical - switch "
+            "to radians when cross-checking a value against the manual.")
+        self.angle_units.currentIndexChanged.connect(
+            lambda _: units.set_degrees(self.angle_units.currentData()))
+
+        toolbar = QToolBar("View", self)
+        toolbar.setMovable(False)
+        toolbar.addWidget(QLabel("Angles  "))
+        toolbar.addWidget(self.angle_units)
+        self.addToolBar(toolbar)
 
     # -- wiring -----------------------------------------------------------
 

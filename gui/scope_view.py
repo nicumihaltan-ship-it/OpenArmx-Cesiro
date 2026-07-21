@@ -29,6 +29,8 @@ from robstride import Motor, protocol as proto
 from robstride import params as P
 from robstride.poller import ParamPoller, Sample
 
+from .units import units
+
 log = logging.getLogger(__name__)
 
 pg.setConfigOptions(antialias=True, background=None, foreground="k")
@@ -82,6 +84,7 @@ class ScopeView(QWidget):
 
         self.sample_ready.connect(self._append_sample)
         self._build_ui()
+        units.changed.connect(self._on_units_changed)
 
     # -- construction -----------------------------------------------------
 
@@ -209,11 +212,26 @@ class ScopeView(QWidget):
 
     def _add_source_item(self, index: int, label: str, unit: str,
                          checked: bool) -> None:
-        item = QListWidgetItem(f"{label}  [{unit}]" if unit else label)
+        item = QListWidgetItem(self._source_text(label, unit))
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        # The stored unit stays canonical; only the visible text follows the
+        # preference, so samples are always accumulated in radians.
         item.setData(Qt.UserRole, (index, label, unit))
         self.source_list.addItem(item)
+
+    @staticmethod
+    def _source_text(label: str, unit: str) -> str:
+        return f"{label}  [{units.label(unit)}]" if unit else label
+
+    def _on_units_changed(self, _degrees: bool) -> None:
+        self.source_list.blockSignals(True)
+        for row in range(self.source_list.count()):
+            item = self.source_list.item(row)
+            _, label, unit = item.data(Qt.UserRole)
+            item.setText(self._source_text(label, unit))
+        self.source_list.blockSignals(False)
+        self._redraw()
 
     # -- motor binding ----------------------------------------------------
 
@@ -341,7 +359,11 @@ class ScopeView(QWidget):
             times = np.fromiter(channel.times, dtype=float)
             values = np.fromiter(channel.values, dtype=float)
             mask = times >= latest - span
-            channel.curve.setData(times[mask], values[mask])
+            # Buffers hold canonical values; converting at draw time means a
+            # unit flip re-renders history already captured instead of
+            # leaving a step in the middle of the trace.
+            channel.curve.setData(times[mask],
+                                  values[mask] * units.factor(channel.unit))
 
         if latest > span:
             self.plot.setXRange(latest - span, latest, padding=0)
@@ -388,9 +410,11 @@ class ScopeView(QWidget):
                 writer = csv.writer(fh)
                 writer.writerow(["channel", "unit", "time_s", "value"])
                 for channel in self.channels.values():
+                    factor = units.factor(channel.unit)
+                    unit = units.label(channel.unit)
                     for t, v in zip(channel.times, channel.values):
-                        writer.writerow([channel.label, channel.unit,
-                                         f"{t:.6f}", v])
+                        writer.writerow([channel.label, unit,
+                                         f"{t:.6f}", v * factor])
         except Exception as exc:
             QMessageBox.critical(self, "Export failed", str(exc))
             return

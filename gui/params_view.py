@@ -20,6 +20,8 @@ from robstride import Motor
 from robstride import params as P
 from robstride.poller import ParamPoller, Sample
 
+from .units import RAD_TO_DEG, is_angular, units
+
 log = logging.getLogger(__name__)
 
 COL_INDEX, COL_NAME, COL_GROUP, COL_TYPE, COL_ACCESS, COL_VALUE, COL_UNIT, \
@@ -80,6 +82,7 @@ class ParamsView(QWidget):
 
         self._build_ui()
         self._populate(self._model)
+        units.changed.connect(self._on_units_changed)
 
     # -- construction -----------------------------------------------------
 
@@ -187,14 +190,8 @@ class ParamsView(QWidget):
             self.table.setItem(row, COL_TYPE, cell(param.dtype))
             self.table.setItem(row, COL_ACCESS, cell(param.access.value))
             self.table.setItem(row, COL_VALUE, cell("", param.writable))
-            self.table.setItem(row, COL_UNIT, cell(param.unit))
-
-            if param.minimum is not None or param.maximum is not None:
-                rng = f"{param.minimum if param.minimum is not None else ''}" \
-                      f" .. {param.maximum if param.maximum is not None else ''}"
-            else:
-                rng = ""
-            self.table.setItem(row, COL_RANGE, cell(rng))
+            self.table.setItem(row, COL_UNIT, cell(units.label(param.unit)))
+            self.table.setItem(row, COL_RANGE, cell(self._range_text(param)))
 
             watch = QTableWidgetItem()
             watch.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
@@ -209,6 +206,55 @@ class ParamsView(QWidget):
                     if item is not None:
                         item.setForeground(Qt.darkGray)
         self._suppress_edit = False
+
+    # -- units ------------------------------------------------------------
+
+    @staticmethod
+    def _range_text(param: P.Param) -> str:
+        """The declared range, in whichever unit is on screen."""
+        if param.minimum is None and param.maximum is None:
+            return ""
+
+        def bound(value):
+            return "" if value is None \
+                else f"{units.to_display(value, param.unit):g}"
+
+        return f"{bound(param.minimum)} .. {bound(param.maximum)}"
+
+    def _on_units_changed(self, _degrees: bool) -> None:
+        """Re-render every angular row after the preference flips.
+
+        Values already read from the motor are re-derived from the canonical
+        number kept in ``Qt.UserRole``. Cells the user has typed into but not
+        yet written have no canonical counterpart, so those are rescaled by
+        the ratio between the old and new units instead - editing a cell and
+        then flipping the toggle must not silently change what gets written.
+        """
+        self._suppress_edit = True
+        try:
+            for param in self._params:
+                row = self._rows[param.index]
+                self.table.item(row, COL_UNIT).setText(units.label(param.unit))
+                self.table.item(row, COL_RANGE).setText(self._range_text(param))
+                if not is_angular(param.unit):
+                    continue
+                item = self.table.item(row, COL_VALUE)
+                canonical = item.data(Qt.UserRole)
+                if canonical is not None and not self._is_dirty(item):
+                    item.setText(
+                        f"{units.to_display(float(canonical), param.unit):.6g}")
+                    continue
+                if not item.text().strip():
+                    continue
+                factor = units.factor(param.unit)
+                previous = RAD_TO_DEG if factor == 1.0 else 1.0
+                try:
+                    shown = float(item.text()) * factor / previous
+                except ValueError:
+                    continue
+                item.setText(f"{shown:.6g}")
+        finally:
+            self._suppress_edit = False
 
     # -- motor binding ----------------------------------------------------
 
@@ -285,10 +331,16 @@ class ParamsView(QWidget):
         row = self._rows.get(index)
         if row is None:
             return
-        text = f"{value:.6g}" if isinstance(value, float) else str(value)
+        param = P.get(index, self._model)
+        shown = value
+        if param is not None and isinstance(value, float):
+            shown = units.to_display(value, param.unit)
+        text = f"{shown:.6g}" if isinstance(shown, float) else str(shown)
         self._suppress_edit = True
         item = self.table.item(row, COL_VALUE)
         item.setText(text)
+        # UserRole always holds the canonical value, so a later unit flip can
+        # re-derive the display without going through the rounded text.
         item.setData(Qt.UserRole, value)
         self._suppress_edit = False
 
@@ -366,8 +418,9 @@ class ParamsView(QWidget):
         for param, item in pending:
             try:
                 value = item.text().strip()
-                self.motor.write(param.index,
-                                 value if param.is_string else float(value))
+                self.motor.write(
+                    param.index, value if param.is_string
+                    else units.to_canonical(float(value), param.unit))
                 self._mark_dirty(item, False)
                 written += 1
                 time.sleep(0.003)
@@ -404,6 +457,14 @@ class ParamsView(QWidget):
             text = item.text().strip()
             if not text:
                 continue
+            # Files are always canonical, whatever the screen is showing, so
+            # an export taken in degrees still imports into a session in
+            # radians and still matches the manual.
+            if is_angular(param.unit) and not param.is_string:
+                try:
+                    text = f"{units.to_canonical(float(text), param.unit):.6g}"
+                except ValueError:
+                    pass
             rows.append({
                 "index": f"0x{param.index:04X}", "name": param.name,
                 "type": param.dtype, "access": param.access.value,
@@ -455,9 +516,15 @@ class ParamsView(QWidget):
             param = P.get(index, self._model)
             if table_row is None or param is None or not param.writable:
                 continue
+            text = str(row.get("value", ""))
+            if is_angular(param.unit) and not param.is_string:
+                try:
+                    text = f"{units.to_display(float(text), param.unit):.6g}"
+                except ValueError:
+                    pass
             self._suppress_edit = True
             item = self.table.item(table_row, COL_VALUE)
-            item.setText(str(row.get("value", "")))
+            item.setText(text)
             self._mark_dirty(item, True)
             self._suppress_edit = False
             loaded += 1

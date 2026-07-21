@@ -202,6 +202,26 @@ per frame. Filter by type or text, and transmit raw frames by hand.
 **Control** — enable/stop, mode switching, per-mode setpoints, and jog.
 The motor stays disabled until you explicitly enable it.
 
+## Degrees or radians
+
+The `Angles` selector in the toolbar switches every angular quantity in the
+GUI between degrees and radians. It defaults to **degrees**, which is easier
+to reason about when you are eyeballing a joint against its mechanical stop.
+
+It is a display layer and nothing more. Positions, speeds and accelerations
+are converted on their way into a widget and converted straight back before
+anything is written, so the protocol, the parameter tables and every
+`0x70xx` register stay in radians. Non-angular units — current, torque,
+voltage, temperature — are never touched.
+
+Two things deliberately stay canonical:
+
+- **Exported JSON/CSV is always radians**, whichever unit is on screen. A
+  capture taken in degrees imports cleanly into a session in radians.
+- **The `Range` column and the manuals agree.** Switch the selector to
+  radians when cross-checking a value against RobStride's documentation,
+  rather than converting in your head.
+
 ## Safety
 
 These are 120 Nm actuators. The panel confirms before enabling, and `STOP`

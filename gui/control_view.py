@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 
 from robstride import Motor, RunMode
 
+from .units import AngleSpin, units
+
 log = logging.getLogger(__name__)
 
 MODE_LABELS = [
@@ -48,6 +50,7 @@ class ControlView(QWidget):
         self.motor: Motor | None = None
         self._last_mode: RunMode | None = None
         self._build_ui()
+        units.changed.connect(self._on_units_changed)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_state)
@@ -116,8 +119,8 @@ class ControlView(QWidget):
 
         # -- per-mode setpoints
         self.op_torque = _spin(-120, 120, 0.0, 0.5, "Nm")
-        self.op_position = _spin(-12.57, 12.57, 0.0, 0.1, "rad")
-        self.op_velocity = _spin(-15, 15, 0.0, 0.1, "rad/s")
+        self.op_position = AngleSpin(-12.57, 12.57, 0.0, 0.1, "rad")
+        self.op_velocity = AngleSpin(-15, 15, 0.0, 0.1, "rad/s")
         self.op_kp = _spin(0, 500, 0.0, 1.0)
         self.op_kd = _spin(0, 100, 1.0, 0.1)
         self.op_start = QPushButton("Enter mode")
@@ -152,9 +155,9 @@ class ControlView(QWidget):
         current_form.addRow("Iq command", self.current_ref)
         current_form.addRow(self.current_send)
 
-        self.speed_ref = _spin(-20, 20, 0.0, 0.1, "rad/s")
+        self.speed_ref = AngleSpin(-20, 20, 0.0, 0.1, "rad/s")
         self.speed_limit_cur = _spin(0, 90, 10.0, 0.5, "A")
-        self.speed_accel = _spin(0, 200, 15.0, 1.0, "rad/s^2")
+        self.speed_accel = AngleSpin(0, 200, 15.0, 1.0, "rad/s^2")
         self.speed_send = QPushButton("Apply speed")
         self.speed_send.clicked.connect(self._apply_speed)
 
@@ -165,9 +168,9 @@ class ControlView(QWidget):
         speed_form.addRow("Acceleration", self.speed_accel)
         speed_form.addRow(self.speed_send)
 
-        self.pos_ref = _spin(-12.57, 12.57, 0.0, 0.05, "rad")
-        self.pos_speed = _spin(0, 20, 2.0, 0.1, "rad/s")
-        self.pos_accel = _spin(0, 200, 10.0, 1.0, "rad/s^2")
+        self.pos_ref = AngleSpin(-12.57, 12.57, 0.0, 0.05, "rad")
+        self.pos_speed = AngleSpin(0, 20, 2.0, 0.1, "rad/s")
+        self.pos_accel = AngleSpin(0, 200, 10.0, 1.0, "rad/s^2")
         self.pos_send = QPushButton("Go to position")
         self.pos_send.setToolTip(
             "Sets the position mode selected above, enables the motor, then "
@@ -182,7 +185,7 @@ class ControlView(QWidget):
         pos_form.addRow(self.pos_send)
 
         # -- jog
-        self.jog_speed = _spin(0.05, 10, 1.0, 0.1, "rad/s")
+        self.jog_speed = AngleSpin(0.05, 10, 1.0, 0.1, "rad/s")
         jog_minus = QPushButton("JOG -")
         jog_plus = QPushButton("JOG +")
         jog_stop = QPushButton("Jog stop")
@@ -237,13 +240,13 @@ class ControlView(QWidget):
                                 "   [scaling constants UNVERIFIED for this model]"))
         # Retune the spin boxes to the selected model's real envelope.
         self.op_torque.setRange(limits.t_min, limits.t_max)
-        self.op_position.setRange(limits.p_min, limits.p_max)
-        self.op_velocity.setRange(limits.v_min, limits.v_max)
+        self.op_position.setRadRange(limits.p_min, limits.p_max)
+        self.op_velocity.setRadRange(limits.v_min, limits.v_max)
         # Kp/Kd scale differently per model (500/5 on RS00-02, 5000/100 on
         # RS03/04), so the spin boxes have to follow the selected model.
         self.op_kp.setRange(limits.kp_min, limits.kp_max)
         self.op_kd.setRange(limits.kd_min, limits.kd_max)
-        self.pos_ref.setRange(limits.p_min, limits.p_max)
+        self.pos_ref.setRadRange(limits.p_min, limits.p_max)
         self.current_ref.setRange(-limits.i_max, limits.i_max)
         self.speed_limit_cur.setRange(0, limits.i_max)
         self._read_mode()
@@ -364,8 +367,8 @@ class ControlView(QWidget):
             return
         try:
             motor.motion_control(
-                torque=self.op_torque.value(), position=self.op_position.value(),
-                velocity=self.op_velocity.value(), kp=self.op_kp.value(),
+                torque=self.op_torque.value(), position=self.op_position.rad(),
+                velocity=self.op_velocity.rad(), kp=self.op_kp.value(),
                 kd=self.op_kd.value())
         except Exception as exc:
             self.op_stream.setChecked(False)
@@ -411,9 +414,10 @@ class ControlView(QWidget):
         try:
             self._ensure_mode(motor, RunMode.VELOCITY)
             motor.write(0x7018, self.speed_limit_cur.value())
-            motor.write(0x7022, self.speed_accel.value())
-            motor.write(0x700A, self.speed_ref.value())
-            self.status.emit(f"Speed {self.speed_ref.value():g} rad/s applied")
+            motor.write(0x7022, self.speed_accel.rad())
+            motor.write(0x700A, self.speed_ref.rad())
+            self.status.emit(
+                f"Speed {units.text(self.speed_ref.rad(), 'rad/s')} applied")
         except Exception as exc:
             QMessageBox.critical(self, "Write failed", str(exc))
 
@@ -440,13 +444,13 @@ class ControlView(QWidget):
         try:
             self._ensure_mode(motor, mode)
             if mode is RunMode.POSITION_PP:
-                motor.write(0x7024, self.pos_speed.value())
-                motor.write(0x7025, self.pos_accel.value())
+                motor.write(0x7024, self.pos_speed.rad())
+                motor.write(0x7025, self.pos_accel.rad())
             else:
-                motor.write(0x7017, self.pos_speed.value())
-            motor.write(0x7016, self.pos_ref.value())
+                motor.write(0x7017, self.pos_speed.rad())
+            motor.write(0x7016, self.pos_ref.rad())
             self.status.emit(
-                f"Moving to {self.pos_ref.value():g} rad in {mode.name}")
+                f"Moving to {units.text(self.pos_ref.rad(), 'rad')} in {mode.name}")
         except Exception as exc:
             QMessageBox.critical(self, "Write failed", str(exc))
 
@@ -454,24 +458,31 @@ class ControlView(QWidget):
         motor = self._require()
         if motor is None:
             return
-        speed = self.jog_speed.value() * direction
+        speed = self.jog_speed.rad() * direction
         try:
             self._ensure_mode(motor, RunMode.VELOCITY)
             motor.write(0x700A, speed)
-            self.status.emit(f"Jog at {speed:g} rad/s" if direction
-                             else "Jog stopped")
+            self.status.emit(f"Jog at {units.text(speed, 'rad/s', sign=True)}"
+                             if direction else "Jog stopped")
         except Exception as exc:
             QMessageBox.critical(self, "Jog failed", str(exc))
 
     # -- live state -------------------------------------------------------
+
+    def _on_units_changed(self, _degrees: bool) -> None:
+        # The spin boxes re-render themselves; the feedback labels are
+        # rewritten on the next tick, which is 100 ms away at most.
+        self._update_state()
 
     def _update_state(self) -> None:
         if self.motor is None:
             return
         state = self.motor.state
         stale = state.age > 1.0
-        self.state_labels["position"].setText(f"{state.position:+.4f} rad")
-        self.state_labels["velocity"].setText(f"{state.velocity:+.3f} rad/s")
+        self.state_labels["position"].setText(
+            units.text(state.position, "rad", sign=True))
+        self.state_labels["velocity"].setText(
+            units.text(state.velocity, "rad/s", rad=3, sign=True))
         self.state_labels["torque"].setText(f"{state.torque:+.3f} Nm")
         self.state_labels["temperature"].setText(f"{state.temperature:.1f} C")
         self.state_labels["mode"].setText(state.mode.name)

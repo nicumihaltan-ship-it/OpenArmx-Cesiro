@@ -37,3 +37,6 @@ robstride_params*.csv
 *.swp
 Thumbs.db
 desktop.ini
+
+# Claude Code session state and worktrees
+.claude/

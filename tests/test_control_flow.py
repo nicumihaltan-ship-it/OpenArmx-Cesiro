@@ -96,7 +96,7 @@ def test_go_to_position_sets_mode_when_motor_is_in_velocity(view):
     motor = FakeMotor(run_mode=RunMode.VELOCITY)
     view.motor = motor
     _select_mode(view, RunMode.POSITION_CSP)
-    view.pos_ref.setValue(1.5)
+    view.pos_ref.setRad(1.5)
 
     view._apply_position()
 
@@ -154,7 +154,7 @@ def test_already_in_mode_does_not_stop_the_motor(view):
 def test_speed_and_current_paths_also_set_their_mode(view):
     speed = FakeMotor(run_mode=RunMode.POSITION_CSP)
     view.motor = speed
-    view.speed_ref.setValue(1.0)
+    view.speed_ref.setRad(1.0)
     view._apply_speed()
     assert speed.writes_to(0x7005)[0][2] == int(RunMode.VELOCITY)
     assert speed.writes_to(0x700A)
@@ -170,7 +170,7 @@ def test_speed_and_current_paths_also_set_their_mode(view):
 def test_jog_still_forces_velocity_mode(view):
     motor = FakeMotor(run_mode=RunMode.POSITION_CSP)
     view.motor = motor
-    view.jog_speed.setValue(1.0)
+    view.jog_speed.setRad(1.0)
     view._jog(1)
 
     assert motor.writes_to(0x7005)[0][2] == int(RunMode.VELOCITY)
