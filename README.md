@@ -200,7 +200,9 @@ communication type / data area 2 / destination, with a plain-language reading
 per frame. Filter by type or text, and transmit raw frames by hand.
 
 **Control** — enable/stop, mode switching, per-mode setpoints, and jog.
-The motor stays disabled until you explicitly enable it.
+The motor stays disabled until you explicitly enable it. What each of the five
+control modes does, and how to calibrate a motor and an arm, is written up (in
+Romanian) in [MODURI-CONTROL-SI-CALIBRARE.md](MODURI-CONTROL-SI-CALIBRARE.md).
 
 ## Safety
 
