@@ -7,7 +7,7 @@ encoder până la zerourile articulațiilor brațului.
 Registrele citate sunt din intervalul `0x7005`–`0x702E` (control în timp real),
 **verificat identic pe RS00, RS03 și RS04**. Restul spațiului de adrese
 (`0x20xx` configurare, `0x30xx` observație) diferă de la model la model — vezi
-[PARAMETERS.md](PARAMETERS.md). Cu alte cuvinte: tot ce urmează despre control
+[PARAMETERS.md](../PARAMETERS.md). Cu alte cuvinte: tot ce urmează despre control
 este portabil între modele; calibrarea atinge pe alocuri și registre care nu
 sunt.
 
@@ -271,7 +271,7 @@ Remediul din manual: recalibrarea encoderului magnetic. Opțional, `iq_test`
 (`0x702D`) pus pe 1 lungește inițializarea în schimbul unei referințe mai
 exacte.
 
-Detalii complete despre acest bloc de registre: [PARAMETERS.md](PARAMETERS.md),
+Detalii complete despre acest bloc de registre: [PARAMETERS.md](../PARAMETERS.md),
 secțiunea despre arhitectura encoderului.
 
 ### B. Zeroul mecanic al fiecărui motor
