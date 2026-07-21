@@ -10,6 +10,7 @@ next to the executable (Windows GUI builds have no console to print to).
 
 from __future__ import annotations
 
+import math
 import platform
 import struct
 import sys
@@ -105,6 +106,65 @@ def _param_table() -> str:
     return ", ".join(f"{m} {n}" for m, n in counts.items())
 
 
+def _opengl() -> str:
+    """The 3D view's stack, which is all dynamic imports underneath.
+
+    pyqtgraph reaches QtOpenGL through importlib, and PyOpenGL resolves its
+    platform backend by name, so a frozen build can lose either one without
+    any build-time complaint. Importing is enough to catch that - creating a
+    real GL context needs a display this check cannot assume.
+    """
+    import OpenGL  # noqa: F401
+    import OpenGL.arrays.numpymodule  # noqa: F401
+    import PySide6.QtOpenGL  # noqa: F401
+    import PySide6.QtOpenGLWidgets  # noqa: F401
+    import pyqtgraph.opengl as gl
+
+    for name in ("GLViewWidget", "GLMeshItem", "GLLinePlotItem",
+                 "GLScatterPlotItem", "GLGridItem", "MeshData"):
+        if not hasattr(gl, name):
+            raise RuntimeError(f"pyqtgraph.opengl is missing {name}")
+    return f"PyOpenGL {OpenGL.__version__}, QtOpenGL present"
+
+
+def _kinematics() -> str:
+    """The FK module, exercised on a chain whose answer is known by hand.
+
+    A frozen build that cannot import numpy through this path, or that ships
+    a broken copy, fails here rather than in front of an arm.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import kinematics as kin
+
+    urdf = """<?xml version="1.0"?>
+    <robot name="selftest">
+      <link name="base"/><link name="link1"/><link name="tip"/>
+      <joint name="j1" type="revolute">
+        <parent link="base"/><child link="link1"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+        <limit lower="-3.14" upper="3.14"/>
+      </joint>
+      <joint name="j2" type="fixed">
+        <parent link="link1"/><child link="tip"/>
+        <origin xyz="1 0 0" rpy="0 0 0"/>
+      </joint>
+    </robot>"""
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "selftest.urdf"
+        path.write_text(urdf, encoding="utf-8")
+        chain = kin.Robot.from_urdf(path).chain("tip")
+
+    if len(chain) != 1:
+        raise RuntimeError(f"expected 1 actuated joint, got {len(chain)}")
+    # A quarter turn about +Z takes the 1 m tip from +X to +Y.
+    tip = chain.position([math.pi / 2])
+    if abs(tip[0]) > 1e-9 or abs(tip[1] - 1.0) > 1e-9:
+        raise RuntimeError(f"tip landed at {tip.round(6)}, expected [0, 1, 0]")
+    return f"{len(chain)} DOF chain, tip at {tip.round(3)}"
+
+
 def _qt() -> str:
     import PySide6
     import PySide6.QtWidgets  # the module the GUI actually needs at runtime
@@ -122,6 +182,8 @@ CHECKS = [
     ("parameter table", _param_table),
     ("model constants", _model_constants),
     ("protocol decode", _protocol_roundtrip),
+    ("forward kinematics", _kinematics),
+    ("OpenGL stack", _opengl),
     ("python-can: pcan backend", lambda: _backend("pcan")),
     ("python-can: socketcan backend", lambda: _backend("socketcan")),
     ("python-can: virtual backend", lambda: _backend("virtual")),

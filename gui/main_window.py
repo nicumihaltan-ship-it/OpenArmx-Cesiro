@@ -1,4 +1,4 @@
-"""Main window: connection dock plus the four working tabs."""
+"""Main window: connection dock plus the five working tabs."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from robstride import unverified
 
 from .connection import ConnectionPanel
 from .control_view import ControlView
+from .kinematics_view import KinematicsView
 from .params_view import ParamsView
 from .scope_view import ScopeView
 from .trace_view import TraceView
@@ -38,6 +39,7 @@ class MainWindow(QMainWindow):
         self.scope_view = ScopeView()
         self.trace_view = TraceView()
         self.control_view = ControlView()
+        self.kinematics_view = KinematicsView()
 
         self._build_toolbar()
 
@@ -46,6 +48,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.scope_view, "Oscilloscope")
         self.tabs.addTab(self.trace_view, "CAN trace")
         self.tabs.addTab(self.control_view, "Control")
+        self.tabs.addTab(self.kinematics_view, "Kinematics")
         self.setCentralWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())
@@ -54,8 +57,7 @@ class MainWindow(QMainWindow):
 
         self.connection.motor_selected.connect(self._on_motor_selected)
         self.connection.inventory_changed.connect(self._on_inventory_changed)
-        for view in (self.params_view, self.scope_view, self.trace_view,
-                     self.control_view):
+        for view in self._views():
             view.status.connect(self.statusBar().showMessage)
 
         self._stats_timer = QTimer(self)
@@ -95,8 +97,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Selected motor {motor.motor_id} on {motor.link.channel}")
 
+    def _views(self):
+        return (self.params_view, self.scope_view, self.trace_view,
+                self.control_view, self.kinematics_view)
+
     def _on_inventory_changed(self) -> None:
         self.trace_view.set_links(self.connection.open_links())
+        # Kinematics works across every mapped motor at once rather than the
+        # one that happens to be selected, so it takes the whole inventory.
+        self.kinematics_view.set_inventory(self.connection.motors)
 
     def _update_stats(self) -> None:
         links = self.connection.open_links()
@@ -125,8 +134,7 @@ class MainWindow(QMainWindow):
     # -- shutdown ---------------------------------------------------------
 
     def closeEvent(self, event) -> None:
-        for view in (self.params_view, self.scope_view, self.trace_view,
-                     self.control_view):
+        for view in self._views():
             try:
                 view.shutdown()
             except Exception:

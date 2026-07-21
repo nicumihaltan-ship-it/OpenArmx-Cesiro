@@ -20,6 +20,31 @@ hidden = [
     "can.interfaces.virtual",
 ]
 
+# The 3D kinematics view needs OpenGL, and both halves of that stack resolve
+# their real modules at runtime rather than by a visible import:
+#
+#  * pyqtgraph reaches QtOpenGL through importlib.import_module(f"{QT_LIB}.
+#    QtOpenGL"), so static analysis never sees PySide6.QtOpenGL at all.
+#  * PyOpenGL picks its platform backend and its array handlers by name.
+#
+# Without these the build succeeds and then dies when the Kinematics tab is
+# opened. The 'OpenGL stack' self-test check exists to catch exactly that.
+hidden += [
+    "PySide6.QtOpenGL",
+    "PySide6.QtOpenGLWidgets",
+    "OpenGL.arrays.ctypesarrays",
+    "OpenGL.arrays.ctypesparameters",
+    "OpenGL.arrays.ctypespointers",
+    "OpenGL.arrays.lists",
+    "OpenGL.arrays.nones",
+    "OpenGL.arrays.numbers",
+    "OpenGL.arrays.numpymodule",
+    "OpenGL.arrays.strings",
+    "OpenGL.arrays.vbo",
+    "OpenGL.platform.win32" if sys.platform == "win32"
+    else "OpenGL.platform.glx",
+]
+
 a = Analysis(
     ["app.py"],
     pathex=[],
