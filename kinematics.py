@@ -334,11 +334,22 @@ class Gripper:
 class Chain:
     """A serial run of joints, base to tip."""
 
-    def __init__(self, base: str, tip: str, joints: list[Joint]):
+    def __init__(self, base: str, tip: str, joints: list[Joint], tool=None):
         self.base = base
         self.tip = tip
         self.joints = joints
         self.actuated = [j for j in joints if j.actuated]
+        #: Tip frame -> tool frame, 4x4. Applied by :meth:`fk`, and so by
+        #: everything built on it - :meth:`position`, both Jacobians and
+        #: :func:`solve_ik` - which is what lets the solver aim a tool tip
+        #: rather than the flange it is bolted to. :meth:`frames` is
+        #: deliberately left alone: it enumerates *link* frames for drawing,
+        #: and a tool is not a link.
+        self.tool = np.eye(4) if tool is None else np.asarray(tool, dtype=float)
+
+    def with_tool(self, tool) -> "Chain":
+        """This chain measured at ``tool`` instead of at the tip link."""
+        return Chain(self.base, self.tip, self.joints, tool)
 
     def __len__(self) -> int:
         return len(self.actuated)
@@ -350,8 +361,8 @@ class Chain:
     # -- kinematics -------------------------------------------------------
 
     def fk(self, q) -> np.ndarray:
-        """Base -> tip transform for the actuated joint values ``q``."""
-        return self.frames(q)[-1][1]
+        """Base -> tool transform for the actuated joint values ``q``."""
+        return self.frames(q)[-1][1] @ self.tool
 
     def frames(self, q) -> list[tuple[str, np.ndarray]]:
         """Every link frame along the chain, base first.

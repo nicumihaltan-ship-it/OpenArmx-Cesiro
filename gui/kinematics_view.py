@@ -16,6 +16,7 @@ import json
 import logging
 import math
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -86,6 +87,34 @@ def find_motor_index(box: QComboBox, key) -> int:
 def _config_path() -> Path:
     base = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
     return Path(base or ".") / "openarmx_kinematics.json"
+
+
+@dataclass
+class JointMapping:
+    """One row of the joint table, as the calibration tab sees it."""
+
+    joint: object                       # kin.Joint
+    motor: object | None                # robstride.Motor, or None if unmapped
+    sign: float
+    offset: float                       # radians
+
+    @property
+    def name(self) -> str:
+        return self.joint.name
+
+    @property
+    def live(self) -> bool:
+        return self.motor is not None and self.motor.state.age <= 1.0
+
+    def value(self) -> float:
+        """The URDF joint value this motor is currently reporting."""
+        if self.motor is None:
+            return 0.0
+        return self.sign * self.motor.state.position + self.offset
+
+    def command(self, value: float) -> float:
+        """The motor angle that would put this joint at ``value``."""
+        return (value - self.offset) / self.sign
 
 
 class KinematicsView(QWidget):
@@ -1068,6 +1097,45 @@ class KinematicsView(QWidget):
             "color: #27ae60;" if fit.converged else "color: #c0392b;")
         self.status.emit("Offsets applied - use 'Set zero here' on each motor "
                          "to bake them in, or keep them here as a correction")
+
+    # -- shared with the calibration tab ----------------------------------
+    #
+    # The calibration procedure needs the same URDF, the same chain and the
+    # same joint-to-motor map this tab already holds, and hands offsets back
+    # when it has identified them. Rebuilding that UI over there would give
+    # the operator two mappings to keep in step, and they would not stay in
+    # step. These three methods are the whole interface between the tabs.
+
+    def calibration_chain(self):
+        """The chain the calibration tab should work on, or ``None``."""
+        return self.chain
+
+    def joint_map(self) -> list[JointMapping]:
+        """Motor, sign and offset for every actuated joint, in chain order."""
+        out = []
+        for joint in self.chain.actuated if self.chain else []:
+            row = self._rows[joint.name]
+            box = self.table.cellWidget(row, COL_MOTOR)
+            out.append(JointMapping(
+                joint=joint,
+                motor=self.motors.get(box.currentData()) if box else None,
+                sign=self.table.cellWidget(row, COL_SIGN).currentData(),
+                offset=math.radians(
+                    self.table.cellWidget(row, COL_OFFSET).value())))
+        return out
+
+    def apply_offsets(self, offsets: dict[str, float]) -> int:
+        """Add identified offsets, in radians, to the offset column."""
+        applied = 0
+        for name, offset in offsets.items():
+            row = self._rows.get(name)
+            if row is None:
+                continue
+            spin = self.table.cellWidget(row, COL_OFFSET)
+            spin.setValue(spin.value() + math.degrees(offset))
+            applied += 1
+        self._save_config()
+        return applied
 
     # -- config -----------------------------------------------------------
 

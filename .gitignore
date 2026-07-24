@@ -31,6 +31,10 @@ robstride_params*.json
 robstride_params*.csv
 .~lock.*#
 
+# Local reference photos (bench setup, whiteboards, etc.) - kept locally but
+# not redistributed through this public repo.
+poze_dima/
+
 # Editors / OS
 .vscode/
 .idea/

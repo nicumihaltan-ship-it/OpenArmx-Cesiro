@@ -1,4 +1,4 @@
-"""Main window: connection dock plus the five working tabs."""
+"""Main window: connection dock plus the six working tabs."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from robstride import unverified
 
+from .calibration_view import CalibrationView
 from .connection import ConnectionPanel
 from .control_view import ControlView
 from .kinematics_view import KinematicsView
@@ -40,6 +41,11 @@ class MainWindow(QMainWindow):
         self.trace_view = TraceView()
         self.control_view = ControlView()
         self.kinematics_view = KinematicsView()
+        # Calibration reads the URDF, the chain and the joint map straight
+        # off the Kinematics tab rather than keeping a second copy: two maps
+        # for one arm would drift apart, and the wrong one would always be
+        # whichever was not on screen.
+        self.calibration_view = CalibrationView(arm=self.kinematics_view)
 
         self._build_toolbar()
 
@@ -49,6 +55,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.trace_view, "CAN trace")
         self.tabs.addTab(self.control_view, "Control")
         self.tabs.addTab(self.kinematics_view, "Kinematics")
+        self.tabs.addTab(self.calibration_view, "Calibration")
         self.setCentralWidget(self.tabs)
 
         self.setStatusBar(QStatusBar())
@@ -57,6 +64,10 @@ class MainWindow(QMainWindow):
 
         self.connection.motor_selected.connect(self._on_motor_selected)
         self.connection.inventory_changed.connect(self._on_inventory_changed)
+        self.calibration_view.offsets_applied.connect(
+            self.kinematics_view.apply_offsets)
+        self.calibration_view.show_kinematics.connect(
+            lambda: self.tabs.setCurrentWidget(self.kinematics_view))
         for view in self._views():
             view.status.connect(self.statusBar().showMessage)
 
@@ -99,13 +110,16 @@ class MainWindow(QMainWindow):
 
     def _views(self):
         return (self.params_view, self.scope_view, self.trace_view,
-                self.control_view, self.kinematics_view)
+                self.control_view, self.kinematics_view,
+                self.calibration_view)
 
     def _on_inventory_changed(self) -> None:
         self.trace_view.set_links(self.connection.open_links())
-        # Kinematics works across every mapped motor at once rather than the
-        # one that happens to be selected, so it takes the whole inventory.
+        # Kinematics and calibration both work across every mapped motor at
+        # once rather than the one that happens to be selected, so they take
+        # the whole inventory.
         self.kinematics_view.set_inventory(self.connection.motors)
+        self.calibration_view.set_inventory(self.connection.motors)
 
     def _update_stats(self) -> None:
         links = self.connection.open_links()

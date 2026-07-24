@@ -13,9 +13,9 @@ OpenArmX-RobStride.exe --selftest
 ```
 
 It checks the Qt runtime, the parameter table, the model constants, protocol
-decoding, forward kinematics, the OpenGL stack, and that all three python-can
-backends load and can pass a real frame. Results go to `selftest-report.txt`
-next to the binary.
+decoding, forward kinematics, the offset-calibration fit, the OpenGL stack,
+and that all three python-can backends load and can pass a real frame. Results
+go to `selftest-report.txt` next to the binary.
 
 ### Building
 
@@ -182,7 +182,7 @@ moment you enable.
 | black | GND |
 | red | VBAT+ (24–60 VDC, 48 V nominal) |
 
-## The five tabs
+## The six tabs
 
 **Parameters** — the full table: identity, firmware version, the flash-stored
 `0x20xx` block, the read-only `0x30xx` observation values, and the runtime
@@ -210,9 +210,15 @@ The motor stays disabled until you explicitly enable it.
 motors are reporting. Map each URDF joint to a motor and the tip pose updates
 live alongside a rotatable 3D view of the arm. From there,
 [drive the tip to a point](#driving-the-tip-to-a-point) with inverse
-kinematics, or
-[calibrate the joint offsets](#calibrating-the-joint-offsets) against measured
-tip positions.
+kinematics, or do a quick [tape-measure offset
+fit](#a-quick-offset-fit-from-measured-tip-positions).
+
+**Calibration** — a step-by-step procedure for the whole calibration, laid
+out as a wizard. Two halves: four steps on the motors alone (encoder health,
+zero and angle range, the power-on position bootstrap, and the joint's
+backlash), then four on the arm as a whole (the joint-to-motor map, the tool
+and fixture, capturing poses, and the fit). See
+[calibrating the arm](#calibrating-the-arm).
 
 ## The gripper
 
@@ -286,12 +292,12 @@ every joint before the setpoints.
 > not the path. Check it, stand clear, and keep `STOP` on the Control tab
 > within reach.
 
-## Calibrating the joint offsets
+## Setting up the arm model
 
-The Kinematics tab turns a tape measure into a calibration. The idea is that
-the tip position the URDF predicts and the tip position you can measure
-disagree by exactly the joint zero errors, and enough poses make those errors
-separable.
+Both the Kinematics tab and the Calibration tab work against a URDF and a
+joint-to-motor map. That map lives in one place — the Kinematics tab — and
+the Calibration tab reads it from there, so there is only ever one map to
+keep correct.
 
 1. **Point it at a URDF.** `Browse` to a description of the arms. Nothing is
    bundled — OpenArmX's own description is CC BY-NC-SA, so the tool reads
@@ -316,18 +322,102 @@ separable.
 5. **Wake the feedback up.** `Enable active reporting on mapped motors`.
    Without it the motors only speak when polled and the readings go stale —
    stale joints are greyed out and excluded from a capture.
-6. **Capture poses.** Move the arm somewhere, measure where the tip really
-   is in the base frame, type the three numbers in millimetres, and press
-   `Capture sample`. Repeat. Seven offsets need at least three well-spread
-   poses; the panel warns while you are under that. Poses that are nearly
-   identical will report a flattering residual and offsets that mean nothing.
-7. **Solve.** `Solve offsets` runs a damped Gauss-Newton fit and shows the
-   tip-error RMS before and after before you accept it. Accepting adds the
-   result to the offsets already in the table.
 
-The fitted offsets are a correction held by this tool. To bake them into the
-motors instead, drive each joint to its true zero and use `Set zero here` on
-the Control tab.
+### A quick offset fit from measured tip positions
+
+The Kinematics tab turns a tape measure into a calibration. The idea is that
+the tip position the URDF predicts and the tip position you can measure
+disagree by exactly the joint zero errors, and enough poses make those errors
+separable.
+
+**Capture poses.** Move the arm somewhere, measure where the tip really is in
+the base frame, type the three numbers in millimetres, and press `Capture
+sample`. Repeat. Seven offsets need at least three well-spread poses; the
+panel warns while you are under that. Poses that are nearly identical will
+report a flattering residual and offsets that mean nothing.
+
+**Solve.** `Solve offsets` runs a damped Gauss-Newton fit and shows the
+tip-error RMS before and after before you accept it. Accepting adds the
+result to the offsets already in the table.
+
+This is the fast path when you have a way to measure the tip into the base
+frame. When you do not — the usual case on a bench — use the Calibration tab
+below, which needs no external metrology at all.
+
+## Calibrating the arm
+
+The Calibration tab runs the whole procedure as a wizard, and it is built
+around one idea that removes the tape measure: **a tool held in a fixture
+that does not move.** If the model were perfect, every arm configuration that
+still seats the tool in the fixture would compute the same tip position. It
+does not, and that scatter is the joint error. Nothing about *where* the
+fixture is has to be known — a rigid tool and a machined seat are the whole
+apparatus.
+
+The steps run in order, and the order matters: the arm-level fit assumes each
+motor reports its own angle correctly, so the motor-level checks come first.
+The list on the left carries a live state glyph per step (`○` to do, `✓` good,
+`!` worth a look, `✗` blocking).
+
+**The motors, without a model:**
+
+1. **Motors** — every motor that will take part, and whether it is fit to be
+   calibrated at all. An uncalibrated encoder (fault bit 7) or an unconfirmed
+   feedback scaling invalidates the whole calibration before it starts: a
+   scale error is not an offset error, and the fit would absorb it into seven
+   meaningless numbers.
+2. **Zero and range** — where each motor thinks zero is (`zero_sta`,
+   `add_offset`, `mechPos`), with buttons to set the `-π..π` range, clear
+   stray software offsets, set a mechanical zero, and save to flash. The three
+   different "zeros" are spelled out here so they do not get confused.
+3. **Power-on bootstrap** — these motors combine two encoders at power-on to
+   resolve which of nine rotor turns the output is in, and when that goes
+   wrong the motor comes up believing it is a fraction of a turn from where it
+   is. Snapshot, power-cycle without moving the arm, and read back: the turn
+   number must repeat and `mech_angle_init2` must agree to well under
+   2π/9 ≈ 0.70 rad. (See [PARAMETERS.md](PARAMETERS.md) for the register
+   chain.)
+4. **Backlash and repeatability** — drives one joint a few degrees either
+   side of where it is, current-limited, and measures the hysteresis by
+   arriving at the same command from above and from below. Whatever that comes
+   to is the floor on what the arm-level fit can achieve; a residual below the
+   backlash is fitting noise. Optional, but worth knowing before you chase a
+   number you cannot reach.
+
+**The arm, against the URDF:**
+
+5. **Arm model** — the chain and the joint map, read from the Kinematics tab.
+   Its one original readout is the last column: where the tip moves for one
+   degree of each motor. If it moves the wrong way, that joint's sign is
+   wrong, and no offset fixes a wrong sign.
+6. **Tool and fixture** — the tool tip in the tip frame (fit it as well and
+   you never have to measure it), and whether the fixture position is known.
+   An unmeasured fixture is fitted as three more unknowns, which is what frees
+   you from measuring it — at the cost of the first joint's offset, which a
+   fixed point structurally cannot see. `Lock what cannot be identified`
+   parks those so the report says "not identified" rather than handing you a
+   number the data never determined.
+7. **Poses** — put the tool in the fixture and work the arm into as many
+   different configurations as it reaches without the tip leaving. A
+   seven-joint arm holding its tip still has four degrees of freedom left, and
+   those are the poses worth capturing. **Suggest poses** generates them by a
+   null-space walk and keeps the subset that pins the offsets down best; a
+   live readout says how much the pose you are in would add. Hand-guiding is
+   the safe way to reach them — driving there only makes sense if the fixture
+   lets the tool pivot.
+8. **Solve and apply** — the fit, and next to each offset an *identifiability*
+   figure in degrees per millimetre of measurement noise. Read that column
+   first: an offset the poses did not constrain is not a small number, it is
+   no number, and the honest thing to do is capture more poses or lock it.
+   `Apply` folds the identified offsets into the Kinematics tab's table and
+   throws the poses away so the same correction cannot be applied twice.
+   `Bake into the motors` optionally writes `add_offset` instead — it measures
+   the readback to check the register's undocumented sign convention, and lets
+   you undo it.
+
+As with the quick fit, the offsets are a correction this tool holds. To bake
+them into the motors instead, use `Bake into the motors` on the last step, or
+drive each joint to its true zero and use `Set zero here` on the Control tab.
 
 The 3D view renders the real mesh geometry through OpenGL, on top of the
 skeleton, the joint axes and the tool frame. Drag to orbit, wheel to zoom,
@@ -471,7 +561,7 @@ scaling constant. Run them with:
 .venv\Scripts\python.exe -m pytest tests -q
 ```
 
-Both executables additionally pass all nine `--selftest` checks as frozen
+Both executables additionally pass every `--selftest` check as frozen
 builds, verified in CI — that is what catches PyInstaller's usual failure mode
 (backends that resolve from source but not once packaged). The Linux binary is
 built and checked on Ubuntu 22.04 / glibc 2.35.

@@ -122,6 +122,57 @@ Most of the table is diagnostic. For closed-loop work you need only these:
 | `0x7024` / `0x7025` | `vel_max` / `acc_set` | PP speed and acceleration |
 | `0x7018` | `limit_cur` | current ceiling in velocity/position modes |
 
+## Which parameters relate to calibration
+
+There are two different kinds of "calibration" in this hardware, and they use
+different registers. Confusing them is the usual way to waste an afternoon.
+
+**1. The magnetic-encoder calibration — done by the motor, not by you.** This
+is the factory (or post-repair) procedure that teaches the motor its own rotor
+angle and the coarse/fine encoder relationship. Its *outputs* are stored in
+flash, and the position bootstrap reads them at every power-on:
+
+| Index (RS04) | Name | Role | Writable |
+|---|---|---|---|
+| `0x2005` | `MechOffset` | Rotor encoder angle offset | flash — **do not hand-edit** |
+| `0x2006` | `chasu_offset` | Output-side (chasu) encoder zero | flash — **do not hand-edit** |
+| `0x3028`–`0x302A` | `as_angle`, `cs_angle`, `chasu_angle` | Encoder angles at init | read-only |
+| `0x3033`–`0x3037` | `chasu_angle_init` … `mech_angle_rotat` | The resolved bootstrap | read-only |
+| `0x3023` bit 7 / bit 9 | `faultSta` | Encoder uncalibrated / init fault | read-only |
+
+You **read** these to diagnose a motor that comes up in the wrong place (see
+[the position chain](#the-position-chain-0x30280x302a-and-0x30330x3037)). You
+never write `MechOffset` or `chasu_offset` by hand — that desynchronises the
+bootstrap. The Calibration tab's first four steps are built entirely on
+reading this group across a power cycle.
+
+**2. The joint-zero calibration — done by you, on top of a working encoder.**
+This is where the arm's idea of "joint = 0" is reconciled with the URDF. It is
+a matter of *offsets applied to a correct angle*, so it is separate from
+anything above:
+
+| Index | Name | What it does | Scope |
+|---|---|---|---|
+| type-6 command | `set_zero` | Makes the present position mechanical zero, in the motor | permanent (motor) |
+| `0x702B` / `0x2029` | `add_offset` | Live software shift of the reported angle | volatile until saved |
+| `0x7029` / `0x2025` | `zero_sta` | Reported range: `0` = 0..2π, `1` = −π..π | volatile until saved |
+| `0x2026` | `position_offset` | High-speed-stage offset (RS04) | flash |
+| (tool config) | joint offset | Correction held by *this tool*, applied to the URDF joint | `openarmx_kinematics.json` |
+
+The last row is the one the Calibration tab's arm-level fit produces. It is
+deliberately the most reversible: it lives in a JSON file, touches no motor,
+and is the recommended place for a joint-zero correction. `set_zero` and
+`add_offset` are the in-motor alternatives, in rough order of permanence.
+
+`zero_sta` is not an offset but belongs here: with `zero_sta = 0` a joint just
+below its zero reports ≈ 6.28 rad instead of a small negative number, and
+every model that consumes the reading has to unwrap it. Set it to `1` before
+calibrating so the numbers read the way you expect.
+
+**Gain "calibration"** (`cur_kp/ki`, `spd_kp/ki`, `loc_kp` in the `0x20xx` and
+`0x70xx` ranges) is tuning, not calibration in this sense, and is out of scope
+for the offset procedure.
+
 The feedback frame already carries position, velocity, torque and temperature
 at up to 100 Hz, so polling `0x3017`/`0x3018` is usually wasted bus bandwidth —
 enable active reporting (type 24) instead.

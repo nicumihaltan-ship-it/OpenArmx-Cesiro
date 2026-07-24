@@ -640,6 +640,40 @@ def get(index: int, model: str = FALLBACK_MODEL) -> Param | None:
     return table.get(index)
 
 
+_BY_NAME: dict[str, dict[str, Param]] = {}
+
+
+def by_name(name: str, model: str = FALLBACK_MODEL) -> Param | None:
+    """Look one up by name instead of index.
+
+    The only safe way to reach a model-specific register generically: the
+    *names* are stable across models where the indices are not - mechPos is
+    0x3017 on an RS04 and 0x3016 on an RS00 - so code that wants "this
+    motor's mechPos" has to ask for it by meaning. Returns ``None`` when the
+    model has no confirmed table, which is the honest answer rather than
+    another model's index.
+
+    Six names appear in both the stored and the runtime range (limit_spd,
+    limit_cur, cur_kp, zero_sta, damper, add_offset, and mechPos as well on
+    some models). The stored entry wins here, because that is the one whose
+    index a caller cannot work out for itself. The runtime copy is identical
+    on every model, so code that wants *that* one should say 0x7017 or
+    0x7019 outright rather than asking by name.
+    """
+    table = _BY_NAME.get(model)
+    if table is None:
+        table = _BY_NAME[model] = {}
+        for param in params_for(model):
+            table.setdefault(param.name, param)
+    return table.get(name)
+
+
+def index_of(name: str, model: str = FALLBACK_MODEL) -> int | None:
+    """This model's index for a named parameter, or ``None``."""
+    param = by_name(name, model)
+    return param.index if param else None
+
+
 def is_model_specific(index: int) -> bool:
     """True for indices whose meaning depends on the motor model."""
     return 0x2000 <= index < 0x4000
